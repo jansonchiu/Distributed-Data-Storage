@@ -44,17 +44,20 @@ def buildDockerImage():
 
 def runInstance(hostPort, ipAddress, subnetName, instanceName):
     command = "docker run -d -p " + hostPort + ":8085 --net=" + subnetName + " --ip=" + ipAddress + " --name=" + instanceName + " -e SOCKET_ADDRESS=" + ipAddress + ":8085" + " -e VIEW=" + view + " -e SHARD_COUNT=" + str(shardCount) + " assignment4-img"
+    print("Start: ", instanceName)
     os.system(command)
     time.sleep(20)
 
 def runAdditionalInstance(hostPort, ipAddress, subnetName, instanceName, newView):
     command = "docker run -d -p " + hostPort + ":8085 --net=" + subnetName + " --ip=" + ipAddress + " --name=" + instanceName + " -e SOCKET_ADDRESS=" + ipAddress + ":8085" + " -e VIEW=" + newView  + " assignment4-img"
+    print("AdditionalStart: ", instanceName)
     os.system(command)
     time.sleep(20)
 
 def stopAndRemoveInstance(instanceName):
     stopCommand = "docker stop " + instanceName
     removeCommand = "docker rm " + instanceName
+    print("Stop: ", instanceName)
     os.system(stopCommand)
     time.sleep(2)
     os.system(removeCommand)
@@ -158,8 +161,8 @@ class TestHW3(unittest.TestCase):
 
         print("\n###################### Getting the Members of Shard IDs ######################\n")
 
-        shard1 = self.shardIdList[0]
-        shard2 = self.shardIdList[1]
+        shard1 = str(self.shardIdList[0])
+        shard2 = str(self.shardIdList[1])
 
         # get the members of shard1 from node2
         response = requests.get( 'http://localhost:8083/key-value-store-shard/shard-id-members/' + shard1)
@@ -274,8 +277,8 @@ class TestHW3(unittest.TestCase):
 
         print("\n###################### Getting key count of each shard ######################\n")
 
-        shard1 = self.shardIdList[0]
-        shard2 = self.shardIdList[1]
+        shard1 = str(self.shardIdList[0])
+        shard2 = str(self.shardIdList[1])
 
         # get the shard1 key count from node5
         response = requests.get( 'http://localhost:8087/key-value-store-shard/shard-id-key-count/' + shard1)
@@ -327,7 +330,7 @@ class TestHW3(unittest.TestCase):
 
         print("\n###################### Assigning the new node to the second shard ######################\n")
 
-        response = requests.put('http://localhost:8082/key-value-store-shard/add-member/' + shard2, json={'socket-address': node7SocketAddress})
+        response = requests.put('http://localhost:8082/key-value-store-shard/add-member/' + str(shard2), json={'socket-address': node7SocketAddress})
         self.assertEqual(response.status_code, 200)
 
         time.sleep(5)
@@ -337,7 +340,7 @@ class TestHW3(unittest.TestCase):
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         node7ShardId = responseInJson['shard-id']
-        self.assertTrue(compareLists(node7ShardId, shard2))
+        self.assertEqual(node7ShardId, shard2)
 
         # get the members of shard2 from node4
         response = requests.get( 'http://localhost:8086/key-value-store-shard/shard-id-members/' + shard2)
@@ -389,21 +392,21 @@ class TestHW3(unittest.TestCase):
 
 
         # get the members of shard1 from node2
-        response = requests.get( 'http://localhost:8083/key-value-store-shard/shard-id-members/' + shard1)
+        response = requests.get( 'http://localhost:8083/key-value-store-shard/shard-id-members/' + str(shard1))
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard1Members = responseInJson['shard-id-members']
         self.assertGreater(len(shard1Members), 1)
 
         # get the members of shard2 from node3
-        response = requests.get( 'http://localhost:8084/key-value-store-shard/shard-id-members/' + shard2)
+        response = requests.get( 'http://localhost:8084/key-value-store-shard/shard-id-members/' + str(shard2))
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard2Members = responseInJson['shard-id-members']
         self.assertGreater(len(shard2Members), 1)
 
         # get the members of shard2 from node4
-        response = requests.get( 'http://localhost:8086/key-value-store-shard/shard-id-members/' + shard3)
+        response = requests.get( 'http://localhost:8086/key-value-store-shard/shard-id-members/' + str(shard3))
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard3Members = responseInJson['shard-id-members']
@@ -428,19 +431,19 @@ class TestHW3(unittest.TestCase):
             self.assertTrue(nodeSocketAddressList[3] in shard3Members)
 
         # get the shard1 key count from node5
-        response = requests.get('http://localhost:8087/key-value-store-shard/shard-id-key-count/' + shard1)
+        response = requests.get('http://localhost:8087/key-value-store-shard/shard-id-key-count/' + str(shard1))
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard1KeyCount = int(responseInJson['shard-id-key-count'])
 
         # get the shard2 key count from node3
-        response = requests.get('http://localhost:8084/key-value-store-shard/shard-id-key-count/' + shard2)
+        response = requests.get('http://localhost:8084/key-value-store-shard/shard-id-key-count/' + str(shard2))
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard2KeyCount = int(responseInJson['shard-id-key-count'])
 
         # get the shard3 key count from node1
-        response = requests.get('http://localhost:8082/key-value-store-shard/shard-id-key-count/' + shard3)
+        response = requests.get('http://localhost:8082/key-value-store-shard/shard-id-key-count/' + str(shard3))
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard3KeyCount = int(responseInJson['shard-id-key-count'])
@@ -477,12 +480,9 @@ class TestHW3(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        print("\nCleaning up replica1 ...")
-        stopAndRemoveInstance("replica1")
-        print("Cleaning up replica2 ...")
-        stopAndRemoveInstance("replica2")
-        print("Cleaning up replica3 ...")
-        stopAndRemoveInstance("replica3")
+        for i in range(1, 8):
+            print("Cleaning up", str(i), "...")
+            stopAndRemoveInstance("node" + str(i))
         print("Cleaning up", subnetName, "...")
         removeSubnet(subnetName)
         print("Done cleaning up.")
