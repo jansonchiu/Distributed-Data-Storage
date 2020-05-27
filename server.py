@@ -10,6 +10,7 @@ vector_clock = {}
 queue = []
 
 shard_store = {}
+this_shard_id = None
 
 socket_addr = os.environ.get('SOCKET_ADDRESS')
 view_as_string = os.environ.get('VIEW')
@@ -23,10 +24,14 @@ def initialize_view():
   broadcast_request('PUT', '/key-value-store-view', json_body) # Weird bug - two PUT requests are sent?
 
 def initialize_shard():
-  global shard_store, replica_store
+  global shard_store, this_shard_id
   j = 0
   for n in replica_store:
     id = j % int(shard_count)
+
+    if n == socket_addr:
+      this_shard_id = id
+
     shard_store.setdefault(id, []).append(n)
     j+=1
 
@@ -117,6 +122,14 @@ def handle_shard_request(shard_op):
   global shard_store
   if shard_op == 'shard-ids':
     return json.dumps({'message': 'Shard IDs retrieved successfully', 'shard-ids': list(shard_store.keys())})
+  elif shard_op == 'node-shard-id':
+    return json.dumps({'message': 'Shard ID of the node retrieved successfully', 'shard-id': this_shard_id})
+
+
+@api.route('/key-value-store-shard/<shard_op>/<shard_num>', methods=['GET'])
+def handle_shard_request_with_num(shard_op, shard_num):
+  global shard_store
+  # ifElse here
 
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
