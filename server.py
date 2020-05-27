@@ -117,13 +117,20 @@ def delete_view(socket_addr):
 
 
 # Shard Operation Routes
-@api.route('/key-value-store-shard/<shard_op>', methods=['GET'])
+@api.route('/key-value-store-shard/<shard_op>', methods=['GET', 'PUT'])
 def handle_shard_request(shard_op):
   global shard_store
   if shard_op == 'shard-ids':
-    return json.dumps({'message': 'Shard IDs retrieved successfully', 'shard-ids': list(shard_store.keys())})
+    return json.dumps({'message': 'Shard IDs retrieved successfully', 'shard-ids': list(shard_store.keys())}), 200
   elif shard_op == 'node-shard-id':
-    return json.dumps({'message': 'Shard ID of the node retrieved successfully', 'shard-id': this_shard_id})
+    return json.dumps({'message': 'Shard ID of the node retrieved successfully', 'shard-id': this_shard_id}), 200
+  elif shard_op == 'reshard':
+    reshard_count = request.json.get('shard-count')
+    if len(replica_store) / reshard_count < 2:
+      return json.dumps({'message': 'Not enough nodes to provide fault tolerance with the given shard count!'}), 400
+    else:
+      # reshard op here
+      return json.dumps({'message': 'Resharding done successfully'}), 200
 
 @api.route('/key-value-store-shard/<shard_op>/<shard_num>', methods=['GET'])
 def handle_shard_request_with_num(shard_op, shard_num):
