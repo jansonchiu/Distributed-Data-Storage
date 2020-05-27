@@ -4,11 +4,16 @@ import os, sys, requests, threading, time
 api = Flask(__name__)
 
 store = {}
+
 replica_store = []
 vector_clock = {}
 queue = []
+
+shard_store = {}
+
 socket_addr = os.environ.get('SOCKET_ADDRESS')
 view_as_string = os.environ.get('VIEW')
+shard_count = os.environ.get('SHARD_COUNT')
 
 # Initialization Method
 def initialize_view():
