@@ -22,6 +22,14 @@ def initialize_view():
   json_body = { 'socket-address': socket_addr }
   broadcast_request('PUT', '/key-value-store-view', json_body) # Weird bug - two PUT requests are sent?
 
+def initialize_shard():
+  global shard_store, replica_store
+  j = 0
+  for n in replica_store:
+    id = j % int(shard_count)
+    shard_store.setdefault(id, []).append(n)
+    j+=1
+
 # Polling Other Replicas
 def poll_replicas():
   while True:
@@ -102,6 +110,13 @@ def delete_view(socket_addr):
     return json.dumps({'message': 'Replica deleted successfully from the view'}), 200
   else:
     return json.dumps({'error': 'Socket address does not exist in the view', 'message': 'Error in DELETE'}), 404
+
+
+@api.route('/key-value-store-shard/<shard_op>', methods=['GET'])
+def handle_shard_request(shard_op):
+  global shard_store
+  if shard_op == 'shard-ids':
+    return json.dumps({'message': 'Shard IDs retrieved successfully', 'shard-ids': list(shard_store.keys())})
 
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
@@ -249,12 +264,13 @@ def get_incremented_clock(vector_clock, addr):
 
 if __name__ == '__main__':
   initialize_view()
-  polling_replica_thread = threading.Thread(target=poll_replicas)
-  polling_replica_thread.start()
+  initialize_shard()
+  # polling_replica_thread = threading.Thread(target=poll_replicas)
+  # polling_replica_thread.start()
   # polling_replica_thread.join() # This won't execute because thread is infinite, so it'll never end.
 
-  polling_vector_clock_thread = threading.Thread(target=poll_vector_clock)
-  polling_vector_clock_thread.start()
+  # polling_vector_clock_thread = threading.Thread(target=poll_vector_clock)
+  # polling_vector_clock_thread.start()
   # polling_vector_clock.join() # This won't execute because thread is infinite, so it'll never end.
 
   api.run(host='0.0.0.0', port=8085, debug=True)
