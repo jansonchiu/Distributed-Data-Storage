@@ -1,4 +1,4 @@
 Janson Chiu:
 Melanie Wong:
-Timothy Nguyen:
+Timothy Nguyen: Helped create algorithm to initialize shard_store, created route to retrieve shard ID of some replica, team communication and synchronization
 Ruikang Tao:

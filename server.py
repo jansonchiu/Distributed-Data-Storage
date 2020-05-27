@@ -10,24 +10,26 @@ vector_clock = {}
 queue = []
 
 shard_store = {}
+shard_count = (int)(os.environ.get('SHARD_COUNT'))
 this_shard_id = None
 
 socket_addr = os.environ.get('SOCKET_ADDRESS')
-view_as_string = os.environ.get('VIEW')
-shard_count = os.environ.get('SHARD_COUNT')
+default_view_str = os.environ.get('VIEW')
+default_view = default_view_str.split(',')
 
 # Initialization Method
 def initialize_view():
   global replica_store
-  replica_store = view_as_string.split(',')
+  replica_store = default_view
   json_body = { 'socket-address': socket_addr }
   broadcast_request('PUT', '/key-value-store-view', json_body) # Weird bug - two PUT requests are sent?
 
 def initialize_shard():
   global shard_store, this_shard_id
   for i in range(len(replica_store)):
-    id = i % int(shard_count)
+    id = i % shard_count
     this_replica = replica_store[i]
+
     if this_replica == socket_addr:
       this_shard_id = id
     shard_store.setdefault(id, []).append(this_replica)
@@ -37,7 +39,7 @@ def poll_replicas():
   while True:
     global replica_store
     time.sleep(5)
-    for replica_addr in view_as_string.split(','):
+    for replica_addr in default_view:
       if replica_addr != socket_addr:
         forward_url = 'http://' + replica_addr + '/key-value-store-view'
         try:
@@ -52,7 +54,7 @@ def poll_vector_clock():
   while True:
     time.sleep(1)
     global vector_clock, store
-    for replica_addr in view_as_string.split(','):
+    for replica_addr in default_view:
       if replica_addr != socket_addr:
         forward_url = 'http://' + replica_addr + '/key-value-store-view?clock'
         try:
@@ -114,6 +116,7 @@ def delete_view(socket_addr):
     return json.dumps({'error': 'Socket address does not exist in the view', 'message': 'Error in DELETE'}), 404
 
 
+# Shard Operation Routes
 @api.route('/key-value-store-shard/<shard_op>', methods=['GET'])
 def handle_shard_request(shard_op):
   global shard_store
@@ -122,11 +125,12 @@ def handle_shard_request(shard_op):
   elif shard_op == 'node-shard-id':
     return json.dumps({'message': 'Shard ID of the node retrieved successfully', 'shard-id': this_shard_id})
 
-
 @api.route('/key-value-store-shard/<shard_op>/<shard_num>', methods=['GET'])
 def handle_shard_request_with_num(shard_op, shard_num):
   global shard_store
-  # ifElse here
+  if shard_op == 'add-member':
+    shard_store[shard_num].append(request.json.get('socket-address'))
+
 
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
