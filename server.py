@@ -25,15 +25,12 @@ def initialize_view():
 
 def initialize_shard():
   global shard_store, this_shard_id
-  j = 0
-  for n in replica_store:
-    id = j % int(shard_count)
-
-    if n == socket_addr:
+  for i in range(len(replica_store)):
+    id = i % int(shard_count)
+    this_replica = replica_store[i]
+    if this_replica == socket_addr:
       this_shard_id = id
-
-    shard_store.setdefault(id, []).append(n)
-    j+=1
+    shard_store.setdefault(id, []).append(this_replica)
 
 # Polling Other Replicas
 def poll_replicas():
