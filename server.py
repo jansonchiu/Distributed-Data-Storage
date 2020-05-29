@@ -152,30 +152,52 @@ def handle_shard_request_with_num(shard_op, shard_num):
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
 def handle_KV_request(key):
   global vector_clock
+  global shard_store
+  requestShardID = key_to_shard_id(key)
   if request.method == 'GET':
-    return get_key(key)
-
-  sender_addr = request.remote_addr+':8085' # hard-coded port number
-  metadata = request.json.get('causal-metadata')
-
-  # Should process
-  if is_next_operation(metadata):
-    if request.method == 'PUT':
-      if sender_addr not in replica_store:
-        # Broadcast if the request is from client.
-        broadcast_request('PUT', '/key-value-store/' + key, request.json)
-        vector_clock = get_incremented_clock(vector_clock, socket_addr)
-      else:
-        vector_clock = get_incremented_clock(metadata, sender_addr)
-      return put_key(key, request)
-    elif request.method == 'DELETE':
+    if requestShardID == this_shard_id:
+      return get_key(key)
+    else: 
+      findNodeInShard = shard_store.get(requestShardID)
+      firstReplicaInShard = findNodeInShard.get(0)
+      forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
+      response = requests.get(forwardUrl)
+      return response.content, response.status_code
+  elif request.method == 'PUT': 
+    if requestShardID == this_shard_id: 
+      sender_addr = request.remote_addr+':8085' # hard-coded port number
+      metadata = request.json.get('causal-metadata')
+      # Should process
+      if is_next_operation(metadata):
+        if request.method == 'PUT':
+          if sender_addr not in replica_store:
+            # Broadcast if the request is from client.
+            broadcast_request('PUT', '/key-value-store/' + key, request.json, True)
+            vector_clock = get_incremented_clock(vector_clock, socket_addr)
+          else:
+            vector_clock = get_incremented_clock(metadata, sender_addr)
+          return put_key(key, request)
+    else: 
+      findNodeInShard = shard_store.get(requestShardID)
+      firstReplicaInShard = findNodeInShard.get(0)
+      forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
+      response = requests.put(forwardUrl, json = request.json)
+      return response.content, response.status_code
+  elif request.method == 'DELETE':
+    if requestShardID == this_shard_id: 
       # Broadcast if the request is from client.
       if sender_addr not in replica_store:
-        broadcast_request('DELETE', '/key-value-store/' + key, request.json)
+        broadcast_request('DELETE', '/key-value-store/' + key, request.json, True)
         vectorClock = get_incremented_clock(vectorClock, socket_addr)
       else:
         vector_clock = get_incremented_clock(vector_clock, socket_addr)
       return delete_key(key, request)
+    else: 
+      findNodeInShard = shard_store.get(requestShardID)
+      firstReplicaInShard = findNodeInShard.get(0)
+      forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
+      response = requests.delete(forwardUrl)
+      return response.content, response.status_code
 
   # Should queue
   else:
@@ -185,6 +207,7 @@ def handle_KV_request(key):
 
 def get_key(key):
   global vector_clock
+
   if key in store:
     return json.dumps({'doesExist': True, 'causal-metadata': vector_clock, 'message': 'Retrieved successfully', 'value': store[key]}), 200
   else:
