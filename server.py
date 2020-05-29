@@ -69,8 +69,14 @@ def poll_vector_clock():
           pass
 
 # Broadcast Message
-def broadcast_request(request_type, target_endpoint, json_body=None):
-  for replica_addr in replica_store:
+def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_replicas=False):
+  local_store = None
+  if to_shard_replicas:
+    local_store = shard_store[this_shard_id]
+  else:
+    local_store = replica_store
+
+  for replica_addr in local_store:
     if replica_addr != socket_addr:
       forward_url = 'http://' + replica_addr + target_endpoint
       try:
