@@ -233,6 +233,9 @@ def is_causally_independent(metadata):
 
   return True
 
+def key_to_shard_id(key):
+  return 0
+
 def queue_request(key, req, method):
   queue.append(json.dumps({'key': key, 'request': req, 'method': method}))
 
