@@ -141,15 +141,15 @@ def handle_shard_request(shard_op):
 @api.route('/key-value-store-shard/<shard_op>/<shard_num>', methods=['GET'])
 def handle_shard_request_with_num(shard_op, shard_num):
   global shard_store
+  shard_id = (int)(shard_num)
   if shard_op == 'add-member':
-    shard_store[shard_num].append(request.json.get('socket-address'))
+    shard_store[shard_id].append(request.json.get('socket-address'))
     return 200
   elif shard_op == 'shard-id-key-count':
     return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
   elif shard_op == 'shard-id-members': 
-    if shard_num in shard_store.keys(): 
-      return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_num)}), 200
-
+    if shard_id in shard_store.keys(): 
+      return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_id)}), 200
 
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
