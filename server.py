@@ -137,6 +137,7 @@ def handle_shard_request_with_num(shard_op, shard_num):
   global shard_store
   if shard_op == 'add-member':
     shard_store[shard_num].append(request.json.get('socket-address'))
+    return 200
   elif shard_op == 'shard-id-key-count':
     return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
 
