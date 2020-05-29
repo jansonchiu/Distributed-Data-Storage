@@ -146,13 +146,11 @@ def handle_shard_request_with_num(shard_op, shard_num):
     return 200
   elif shard_op == 'shard-id-key-count':
     return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
+  elif shard_op == 'shard-id-members': 
+    if shard_num in shard_store.keys(): 
+      return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_num)}), 200
 
-@api.route('/key-value-store-shard/shard-id-members/<shard_id>', methods=['GET'])
-def handle_get_shard_members(shard_id):
-  global shard_store
-  if shard_id in shard_store.keys(): 
-    return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_id)}), 200
-  
+
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
 def handle_KV_request(key):
