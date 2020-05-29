@@ -138,13 +138,13 @@ def handle_shard_request(shard_op):
       # reshard op here
       return json.dumps({'message': 'Resharding done successfully'}), 200
 
-@api.route('/key-value-store-shard/<shard_op>/<shard_num>', methods=['GET'])
+@api.route('/key-value-store-shard/<shard_op>/<shard_num>', methods=['GET', 'PUT'])
 def handle_shard_request_with_num(shard_op, shard_num):
   global shard_store
   shard_id = (int)(shard_num)
   if shard_op == 'add-member':
     shard_store[shard_id].append(request.json.get('socket-address'))
-    return 200
+    return "Node added.", 200
   elif shard_op == 'shard-id-key-count':
     return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
   elif shard_op == 'shard-id-members': 
