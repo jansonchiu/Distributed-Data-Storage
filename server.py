@@ -84,7 +84,7 @@ def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_re
           response = requests.put(forward_url, json=json_body)
         if request_type == 'DELETE':
           response = requests.delete(forward_url, json=json_body)
-      except: # Maybe do some error-checking here
+      except Exception as e:
         pass
 
 # Replica View Routes
@@ -143,13 +143,22 @@ def handle_shard_request_with_num(shard_op, shard_num):
   global shard_store
   shard_id = (int)(shard_num)
   if shard_op == 'add-member':
-    shard_store[shard_id].append(request.json.get('socket-address'))
+    new_node_ip = request.json.get('socket-address')
+    shard_store[shard_id].append(new_node_ip)
+    broadcast_request('PUT', '/internal/add-member', {'new-node-ip': new_node_ip, 'shard-id': shard_id}) 
     return "Node added.", 200
   elif shard_op == 'shard-id-key-count':
     return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
   elif shard_op == 'shard-id-members': 
     if shard_id in shard_store.keys(): 
       return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_id)}), 200
+
+@api.route('/internal/add-member', methods=['PUT'])
+def handle_internal_add_member():
+  new_node_ip = request.json.get('new-node-ip')
+  shard_id = request.json.get('shard-id')
+  shard_store[shard_id].append(new_node_ip)
+  return "Added.", 200
 
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
