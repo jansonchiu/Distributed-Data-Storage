@@ -90,10 +90,14 @@ def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_re
 # Replica View Routes
 @api.route('/key-value-store-view', methods = ['GET', 'PUT', 'DELETE'])
 def view():
+  global store
   if request.method == 'GET':
     return get_view(request.args)
   elif request.method == 'PUT':
-    return put_view(request.json.get('socket-address'))
+    if 'replace_store' in request.args: 
+      store = request.json.get('store')
+    else: 
+      return put_view(request.json.get('socket-address'))
   elif request.method == 'DELETE':
     return delete_view(request.json.get('socket-address'))
 
@@ -210,7 +214,6 @@ def handle_KV_request(key):
 
 def get_key(key):
   global vector_clock
-
   if key in store:
     return json.dumps({'doesExist': True, 'causal-metadata': vector_clock, 'message': 'Retrieved successfully', 'value': store[key]}), 200
   else:
@@ -269,11 +272,50 @@ def key_to_shard_id(key):
   return 0
 
 def reshard(shard_count):
+  global shard_store, replica_store, this_shard_id, store
   # make a copy of shard_store
+  this_shard_id = shard_count
+  shard_store_old = shard_store.copy()
+
   # initialize copied shard_store with new keys
   #   redistribute replicaIDs into new shardIDs
 
+  for i in range(len(replica_store)):
+    id = i % shard_count
+    this_replica = replica_store[i]
+
+    if this_replica == socket_addr:
+      this_shard_id = id
+    shard_store.setdefault(id, []).append(this_replica)
+
   # detect which have been added or removed from this shardID from 0 to len(shard_store)
+  key_shard_map = {}
+
+  # This adds all the keys to the respective shardID 
+  #Refactor: Can also request store from every repica in other shards 
+  for k in store.keys(): 
+    id = key_to_shard_id(k)
+    key_shard_map.setdefault(id, []).append((k, store[k]))
+
+  #remove and populate all kvs of replicas in the shard
+
+  for id in shard_store:
+    #Creates a new store for the shard_id 
+    ListOfShardTuples = key_shard_map[id]
+    store_to_be_added = {}
+    for k in ListOfShardTuples: 
+      for a, b in k:
+        store_to_be_added.set(a,b)
+    json_body = { 'store': store_to_be_added }
+    # Check if it is our shard, so we can change locally 
+    if id == this_shard_id: 
+      store = store_to_be_added
+      broadcast_request('PUT', '/key-value-store?replace_store', json_body, True)
+    else: 
+      #If it is not our replica 
+      replicaList = shard_store[id]
+      request.put('http://' +replicaList[0]+'/key-store-view?replace_store', json_body)
+
   # for all the shards that been removed
   #   delete all key from this (current) shardID
           #   override current  keys from replicas with keys from new shardID
