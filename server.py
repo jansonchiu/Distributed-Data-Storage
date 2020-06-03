@@ -109,7 +109,7 @@ def view():
 def get_view(params):
   global replica_store
   if 'store' in params:
-    return json.dumps({'message': 'View retrieved successfully', 'store': store}), 200
+    return json.dumps({'message': 'Store retrieved successfully', 'store': store}), 200
   elif 'clock' in params:
     return json.dumps({'vector_clock': vector_clock, 'store': store}), 200
   else:
@@ -117,7 +117,10 @@ def get_view(params):
 
 def put_view(socket_addr):
   global replica_store
-  if socket_addr in replica_store:
+  if 'vector-clock' in params:
+    # update vector clock
+    return json.dumps({'message': 'Clock successfully updated'}), 200
+  elif socket_addr in replica_store:
     return json.dumps({'error': 'Socket address already exists in the view', 'message': 'Error in PUT'}), 404
   else:
     replica_store.append(socket_addr)
@@ -155,12 +158,12 @@ def handle_shard_request_with_num(shard_op, shard_num):
     new_node_ip = request.json.get('socket-address')
     shard_store[shard_id].append(new_node_ip)
     broadcast_request('PUT', '/internal/add-member', {'new-node-ip': new_node_ip, 'shard-id': shard_id})
-    requests.put('http://' + new_node_ip + '/internal/catch-up', json={'shard-store': shard_store}) 
+    requests.put('http://' + new_node_ip + '/internal/catch-up', json={'shard-store': shard_store})
     return "Node added.", 200
   elif shard_op == 'shard-id-key-count':
     return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
-  elif shard_op == 'shard-id-members': 
-    if shard_id in shard_store.keys(): 
+  elif shard_op == 'shard-id-members':
+    if shard_id in shard_store.keys():
       return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_id)}), 200
 
 # Internal route that handles the broadcast of adding a new node.
@@ -229,7 +232,7 @@ def handle_KV_request(key):
       return delete_key(key, request)
     else:
       findNodeInShard = shard_store.get(requestShardID)
-      firstReplicaInShard = findNodeInShard.get(0)
+      firstReplicaInShard = findNodeInShard[0]
       forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
       response = requests.delete(forwardUrl)
       return response.content, response.status_code
@@ -260,11 +263,11 @@ def put_key(key, request):
   if store.get(key) is None:
     store[key] = value
     check_queue()
-    return json.dumps({'message': 'Added successfully', 'replaced': False, 'causal-metadata': vector_clock}), 201
+    return json.dumps({'message': 'Added successfully', 'replaced': False, 'causal-metadata': vector_clock, 'shard-id': this_shard_id}), 201
   else:
     store[key] = value
     check_queue()
-    return json.dumps({'message': 'Updated successfully', 'replaced': True, 'causal-metadata': vector_clock}), 200
+    return json.dumps({'message': 'Updated successfully', 'replaced': True, 'causal-metadata': vector_clock, 'shard-id': this_shard_id}), 200
 
 def delete_key(key, request):
   global vector_clock
