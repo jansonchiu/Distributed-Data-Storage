@@ -177,10 +177,21 @@ def handle_internal_add_member():
 # Internal route for a new node to receive the latest shard store.
 @api.route('/internal/catch-up', methods=['PUT'])
 def handle_interal_catch_up():
-  global shard_store
+  global store, shard_store
   json_shard_store = request.json.get('shard-store')
   for shard_id_str, node_socks in json_shard_store.items():
-    shard_store[(int)(shard_id_str)] = node_socks
+    shard_id = (int)(shard_id_str)
+    shard_store[shard_id] = node_socks
+    # Get this_shard_id
+    if socket_addr in node_socks:
+      this_shard_id = shard_id
+  # Get store from the right shard ID.
+  # Not the cleanest. What if first node in the shard is the new node itself?
+  node_from_same_shard = shard_store[this_shard_id][0]
+  # Not clean. Why can store be got from view?
+  url_to_get_store = 'http://' + node_from_same_shard + '/key-value-store-view?store'
+  #print(requests.get(url_to_get_store), file=sys.stderr)
+  store = requests.get(url_to_get_store).json().get('store')
   return "Updated.", 200
 
 # Key-Value Routes
