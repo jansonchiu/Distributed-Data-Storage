@@ -304,6 +304,7 @@ def key_to_shard_id(key):
   hash_value = md5(key.encode('utf-8'))
   key_value = int(hash_value.hexdigest(), 16)
   shard_id = key_value % shard_count
+  print("key to shard id: ", key, shard_id)
   return shard_id
 
 def reshard(shard_count):
@@ -336,7 +337,9 @@ def reshard(shard_count):
 
   for id in shard_store:
     #Creates a new store for the shard_id 
-    ListOfShardTuples = key_shard_map[id]
+    print("id: ", id)
+    ListOfShardTuples = key_shard_map.get(id)
+    print("ListOfShardTuples: ", ListOfShardTuples)
     store_to_be_added = {}
     for k in ListOfShardTuples: 
       for a, b in k:
