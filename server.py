@@ -1,3 +1,5 @@
+
+from hashlib import md5
 from flask import Flask, json, request, jsonify
 import os, sys, requests, threading, time
 
@@ -192,7 +194,7 @@ def handle_KV_request(key):
       return get_key(key)
     else:
       findNodeInShard = shard_store.get(requestShardID)
-      firstReplicaInShard = findNodeInShard.get(0)
+      firstReplicaInShard = findNodeInShard[0]
       forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
       response = requests.get(forwardUrl)
       return response.content, response.status_code
@@ -212,7 +214,7 @@ def handle_KV_request(key):
           return put_key(key, request)
     else:
       findNodeInShard = shard_store.get(requestShardID)
-      firstReplicaInShard = findNodeInShard.get(0)
+      firstReplicaInShard = findNodeInShard[0]
       forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
       response = requests.put(forwardUrl, json = request.json)
       return response.content, response.status_code
@@ -296,7 +298,10 @@ def is_causally_independent(metadata):
   return True
 
 def key_to_shard_id(key):
-  return 0
+  hash_value = md5(key.encode('utf-8'))
+  key_value = int(hash_value.hexdigest(), 16)
+  shard_id = key_value % shard_count
+  return shard_id
 
 def reshard(shard_count):
   # make a copy of shard_store
