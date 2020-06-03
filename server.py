@@ -12,7 +12,6 @@ vector_clock = {}
 queue = []
 
 shard_store = {}
-shard_count = -1
 this_shard_id = None
 
 socket_addr = os.environ.get('SOCKET_ADDRESS')
@@ -33,10 +32,9 @@ def initialize_shard():
   if (shard_count_env is None):
     return
 
-  global shard_store, shard_count, this_shard_id
-  shard_count = (int)(shard_count_env)
+  global shard_store, this_shard_id
   for i in range(len(replica_store)):
-    id = i % shard_count
+    id = i % (int)(shard_count_env)
     this_replica = replica_store[i]
 
     if this_replica == socket_addr:
@@ -177,7 +175,7 @@ def handle_internal_add_member():
 # Internal route for a new node to receive the latest shard store.
 @api.route('/internal/catch-up', methods=['PUT'])
 def handle_interal_catch_up():
-  global store, shard_store
+  global store, shard_store, this_shard_id
   json_shard_store = request.json.get('shard-store')
   for shard_id_str, node_socks in json_shard_store.items():
     shard_id = (int)(shard_id_str)
@@ -200,6 +198,7 @@ def handle_KV_request(key):
   global vector_clock
   global shard_store
   requestShardID = key_to_shard_id(key)
+  print(requestShardID, file=sys.stderr)
   if request.method == 'GET':
     if requestShardID == this_shard_id:
       return get_key(key)
@@ -311,7 +310,7 @@ def is_causally_independent(metadata):
 def key_to_shard_id(key):
   hash_value = md5(key.encode('utf-8'))
   key_value = int(hash_value.hexdigest(), 16)
-  shard_id = key_value % shard_count
+  shard_id = key_value % len(shard_store.keys())
   return shard_id
 
 def reshard(shard_count):
