@@ -1,3 +1,5 @@
+
+from hashlib import md5
 from flask import Flask, json, request, jsonify
 import os, sys, requests, threading, time
 
@@ -10,7 +12,7 @@ vector_clock = {}
 queue = []
 
 shard_store = {}
-shard_count = (int)(os.environ.get('SHARD_COUNT'))
+shard_count = -1
 this_shard_id = None
 
 socket_addr = os.environ.get('SOCKET_ADDRESS')
@@ -25,7 +27,14 @@ def initialize_view():
   broadcast_request('PUT', '/key-value-store-view', json_body) # Weird bug - two PUT requests are sent?
 
 def initialize_shard():
-  global shard_store, this_shard_id
+  # Don't initialize shard store if SHARD_COUNT env var is none,
+  # Which can happen if it's a newly added node.
+  shard_count_env = os.environ.get('SHARD_COUNT')
+  if (shard_count_env is None):
+    return
+
+  global shard_store, shard_count, this_shard_id
+  shard_count = (int)(shard_count_env)
   for i in range(len(replica_store)):
     id = i % shard_count
     this_replica = replica_store[i]
@@ -84,7 +93,7 @@ def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_re
           response = requests.put(forward_url, json=json_body)
         if request_type == 'DELETE':
           response = requests.delete(forward_url, json=json_body)
-      except: # Maybe do some error-checking here
+      except Exception as e:
         pass
 
 # Replica View Routes
@@ -142,18 +151,41 @@ def handle_shard_request(shard_op):
       reshard(reshard_count)
       return json.dumps({'message': 'Resharding done successfully'}), 200
 
-@api.route('/key-value-store-shard/<shard_op>/<shard_num>', methods=['GET'])
+@api.route('/key-value-store-shard/<shard_op>/<shard_num>', methods=['GET', 'PUT'])
 def handle_shard_request_with_num(shard_op, shard_num):
   global shard_store
   shard_id = (int)(shard_num)
   if shard_op == 'add-member':
-    shard_store[shard_id].append(request.json.get('socket-address'))
-    return 200
+    new_node_ip = request.json.get('socket-address')
+    shard_store[shard_id].append(new_node_ip)
+    broadcast_request('PUT', '/internal/add-member', {'new-node-ip': new_node_ip, 'shard-id': shard_id})
+    requests.put('http://' + new_node_ip + '/internal/catch-up', json={'shard-store': shard_store}) 
+    return "Node added.", 200
   elif shard_op == 'shard-id-key-count':
     return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
-  elif shard_op == 'shard-id-members':
-    if shard_id in shard_store.keys():
+  elif shard_op == 'shard-id-members': 
+    if shard_id in shard_store.keys(): 
       return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_id)}), 200
+
+# Internal route that handles the broadcast of adding a new node.
+@api.route('/internal/add-member', methods=['PUT'])
+def handle_internal_add_member():
+  new_node_ip = request.json.get('new-node-ip')
+  # Skip if it's about self.
+  if (new_node_ip == socket_addr):
+    return "Skipped.", 200
+  shard_id = request.json.get('shard-id')
+  shard_store[shard_id].append(new_node_ip)
+  return "Added.", 200
+
+# Internal route for a new node to receive the latest shard store.
+@api.route('/internal/catch-up', methods=['PUT'])
+def handle_interal_catch_up():
+  global shard_store
+  json_shard_store = request.json.get('shard-store')
+  for shard_id_str, node_socks in json_shard_store.items():
+    shard_store[(int)(shard_id_str)] = node_socks
+  return "Updated.", 200
 
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
@@ -166,7 +198,7 @@ def handle_KV_request(key):
       return get_key(key)
     else:
       findNodeInShard = shard_store.get(requestShardID)
-      firstReplicaInShard = findNodeInShard.get(0)
+      firstReplicaInShard = findNodeInShard[0]
       forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
       response = requests.get(forwardUrl)
       return response.content, response.status_code
@@ -186,7 +218,7 @@ def handle_KV_request(key):
           return put_key(key, request)
     else:
       findNodeInShard = shard_store.get(requestShardID)
-      firstReplicaInShard = findNodeInShard.get(0)
+      firstReplicaInShard = findNodeInShard[0]
       forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
       response = requests.put(forwardUrl, json = request.json)
       return response.content, response.status_code
@@ -269,7 +301,10 @@ def is_causally_independent(metadata):
   return True
 
 def key_to_shard_id(key):
-  return 0
+  hash_value = md5(key.encode('utf-8'))
+  key_value = int(hash_value.hexdigest(), 16)
+  shard_id = key_value % shard_count
+  return shard_id
 
 def reshard(shard_count):
   global shard_store, replica_store, this_shard_id, store
