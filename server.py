@@ -162,7 +162,15 @@ def handle_shard_request_with_num(shard_op, shard_num):
     requests.put('http://' + new_node_ip + '/internal/catch-up', json={'shard-store': shard_store})
     return "Node added.", 200
   elif shard_op == 'shard-id-key-count':
-    return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
+    if shard_id == this_shard_id:
+      return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
+    else:
+      findNodeInShard = shard_store.get(shard_id)
+      firstReplicaInShard = findNodeInShard[0]
+      forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store-shard/shard-id-key-count/'+ shard_num
+      print('fwd url', forwardUrl)
+      response = requests.get(forwardUrl)
+      return response.content, response.status_code
   elif shard_op == 'shard-id-members':
     if shard_id in shard_store.keys():
       return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_id)}), 200
