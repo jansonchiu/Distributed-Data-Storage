@@ -212,8 +212,6 @@ def handle_KV_request(key):
       return get_key(key)
     else:
       # Forward to first replica in appropriate shard id.
-      # findNodeInShard = shard_store.get(requestShardID)
-      # firstReplicaInShard = findNodeInShard[0]
       forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
       response = requests.get(forwardUrl)
       return response.content, response.status_code
@@ -230,8 +228,6 @@ def handle_KV_request(key):
             return put_key(key, request)
           else:
             # Forward to first replica in appropriate shard id.
-            # findNodeInShard = shard_store.get(requestShardID)
-            # firstReplicaInShard = findNodeInShard[0]
             forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
             response = requests.put(forwardUrl, json = request.json)
             vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
@@ -259,8 +255,6 @@ def handle_KV_request(key):
           return delete_key(key, request)
         else:
           # Forward to first replica in appropriate shard id.
-          # findNodeInShard = shard_store.get(requestShardID)
-          # firstReplicaInShard = findNodeInShard[0]
           forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
           response = requests.delete(forwardUrl)
           vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
