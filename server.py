@@ -187,6 +187,13 @@ def handle_interal_catch_up():
     shard_store[(int)(shard_id_str)] = node_socks
   return "Updated.", 200
 
+@api.route('/internal/update-vc', methods=['PUT'])
+def handle_update_vc():
+  global vector_clock
+  print('Internal VC update to: ', request.json.get('vc'), file=sys.stderr)
+  vector_clock = request.json.get('vc')
+  return "VC updated.", 200
+
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
 def handle_KV_request(key):
@@ -212,12 +219,14 @@ def handle_KV_request(key):
     # Same shard, process and broadcast to other nodes in shard.
     if requestShardID == this_shard_id:
       if request.method == 'PUT':
-        # Broadcast within shard if the request is from client, or node from another shard.
+        # This node will be the first to process the request,
+        # If the request is from client, or node from another shard.
         if sender_addr not in shard_store.get(this_shard_id):
-          broadcast_request('PUT', '/key-value-store/' + key, request.json, True)
           vector_clock = get_incremented_clock(vector_clock, socket_addr)
-        else:
-          vector_clock = get_incremented_clock(metadata, sender_addr)
+          broadcast_request('PUT', '/key-value-store/' + key, request.json, True)
+          broadcast_request('PUT', '/internal/update-vc', {'vc': vector_clock}, False)
+        #else:
+          #vector_clock = get_incremented_clock(metadata, sender_addr)
         return put_key(key, request)
       elif request.method == 'DELETE':
         pass
