@@ -253,7 +253,7 @@ def handle_KV_request(key):
             return put_key(key, request)
           else:
             vector_clock = get_incremented_clock(vector_clock, sender_addr)
-            return "updating vector clock only"
+            return json.dumps({'message': 'updated vector clock only', 'causal-metadata': vector_clock, 'shard-id': this_shard_id}), 200
     elif request.method == 'DELETE':
       if sender_addr not in replica_store:
         if requestShardID == this_shard_id:
@@ -279,7 +279,7 @@ def handle_KV_request(key):
           return delete_key(key, request)
         else:
           vector_clock = get_incremented_clock(vector_clock, sender_addr)
-          return "updating vector clock only"
+          return json.dumps({'message': 'updated vector clock only', 'causal-metadata': vector_clock, 'shard-id': this_shard_id}), 200
   # Should queue
   else:
     queue_request(key, request.json, request.method)
