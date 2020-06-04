@@ -97,12 +97,14 @@ def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_re
 # Replica View Routes
 @api.route('/key-value-store-view', methods = ['GET', 'PUT', 'DELETE'])
 def view():
-  global store
+  global store, vector_clock
   if request.method == 'GET':
     return get_view(request.args)
   elif request.method == 'PUT':
     if 'replace_store' in request.args:
       store = request.json.get('store')
+    elif 'increment' in request.args:
+      vector_clock = get_incremented_clock(vector_clock, request.json.get('forwarded-address'))
     else:
       return put_view(request.json.get('socket-address'))
   elif request.method == 'DELETE':
@@ -233,6 +235,7 @@ def handle_KV_request(key):
             forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
             response = requests.put(forwardUrl, json = request.json)
             vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
+            broadcast_request('PUT', '/key-value-store-view?increment', {'forwarded-address': firstReplicaInShard}, True)
             return response.content, response.status_code
         else:
           # received broadcast/forwarded request.
@@ -245,7 +248,7 @@ def handle_KV_request(key):
               vector_clock = get_incremented_clock(vector_clock, sender_addr)
             return put_key(key, request)
           else:
-            vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
+            vector_clock = get_incremented_clock(vector_clock, sender_addr)
             return "updating vector clock only"
     elif request.method == 'DELETE':
       if sender_addr not in replica_store:
@@ -273,7 +276,7 @@ def handle_KV_request(key):
             vector_clock = get_incremented_clock(vector_clock, sender_addr)
           return delete_key(key, request)
         else:
-          vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
+          vector_clock = get_incremented_clock(vector_clock, sender_addr)
           return "updating vector clock only"
   # Should queue
   else:
