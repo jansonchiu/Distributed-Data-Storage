@@ -249,27 +249,27 @@ def handle_KV_request(key):
 def get_key(key):
   global vector_clock
   if key in store:
-    return json.dumps({'doesExist': True, 'causal-metadata': vector_clock, 'message': 'Retrieved successfully', 'value': store[key]}), 200
+    return json.dumps({'doesExist': True, 'causal-metadata': vector_clock, 'message': 'Retrieved successfully', 'value': store[key], "shard-id": this_shard_id}), 200
   else:
-    return json.dumps({'doesExist': False, 'causal-metadata': vector_clock, 'error': 'Key does not exist', 'message': 'Error in GET'}), 404
+    return json.dumps({'doesExist': False, 'causal-metadata': vector_clock, 'error': 'Key does not exist', 'message': 'Error in GET', "shard-id": this_shard_id}), 404
 
 def put_key(key, request):
   value = request.json.get('value')
   if value is None:
-    return json.dumps({'error': 'Value is missing', 'message': 'Error in PUT'}), 400
+    return json.dumps({'error': 'Value is missing', 'message': 'Error in PUT', "shard-id": this_shard_id}), 400
   elif len(key) > 50:
-    return json.dumps({'error': 'Key is too long', 'message': 'Error in PUT'}), 400
+    return json.dumps({'error': 'Key is too long', 'message': 'Error in PUT', "shard-id": this_shard_id}), 400
 
   global vector_clock
   # Set response body based on if it's a adding or updating a key.
   if store.get(key) is None:
     store[key] = value
     check_queue()
-    return json.dumps({'message': 'Added successfully', 'replaced': False, 'causal-metadata': vector_clock}), 201
+    return json.dumps({'message': 'Added successfully', 'replaced': False, 'causal-metadata': vector_clock, "shard-id": this_shard_id}), 201
   else:
     store[key] = value
     check_queue()
-    return json.dumps({'message': 'Updated successfully', 'replaced': True, 'causal-metadata': vector_clock}), 200
+    return json.dumps({'message': 'Updated successfully', 'replaced': True, 'causal-metadata': vector_clock, "shard-id": this_shard_id}), 200
 
 def delete_key(key, request):
   global vector_clock
