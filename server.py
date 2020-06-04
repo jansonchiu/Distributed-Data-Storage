@@ -101,9 +101,9 @@ def view():
   if request.method == 'GET':
     return get_view(request.args)
   elif request.method == 'PUT':
-    if 'replace_store' in request.args: 
+    if 'replace_store' in request.args:
       store = request.json.get('store')
-    else: 
+    else:
       return put_view(request.json.get('socket-address'))
   elif request.method == 'DELETE':
     return delete_view(request.json.get('socket-address'))
@@ -119,10 +119,7 @@ def get_view(params):
 
 def put_view(socket_addr):
   global replica_store
-  if 'vector-clock' in params:
-    # update vector clock
-    return json.dumps({'message': 'Clock successfully updated'}), 200
-  elif socket_addr in replica_store:
+  if socket_addr in replica_store:
     return json.dumps({'error': 'Socket address already exists in the view', 'message': 'Error in PUT'}), 404
   else:
     replica_store.append(socket_addr)
@@ -352,30 +349,30 @@ def reshard(shard_count):
   # detect which have been added or removed from this shardID from 0 to len(shard_store)
   key_shard_map = {}
 
-  # This adds all the keys to the respective shardID 
-  #Refactor: Can also request store from every repica in other shards 
-  for k in store.keys(): 
+  # This adds all the keys to the respective shardID
+  #Refactor: Can also request store from every repica in other shards
+  for k in store.keys():
     id = key_to_shard_id(k)
     key_shard_map.setdefault(id, []).append((k, store[k]))
 
   #remove and populate all kvs of replicas in the shard
 
   for id in shard_store:
-    #Creates a new store for the shard_id 
+    #Creates a new store for the shard_id
     print("id: ", id)
     ListOfShardTuples = key_shard_map.get(id)
     print("ListOfShardTuples: ", ListOfShardTuples)
     store_to_be_added = {}
-    for k in ListOfShardTuples: 
+    for k in ListOfShardTuples:
       for a, b in k:
         store_to_be_added.set(a,b)
     json_body = { 'store': store_to_be_added }
-    # Check if it is our shard, so we can change locally 
-    if id == this_shard_id: 
+    # Check if it is our shard, so we can change locally
+    if id == this_shard_id:
       store = store_to_be_added
       broadcast_request('PUT', '/key-value-store?replace_store', json_body, True)
-    else: 
-      #If it is not our replica 
+    else:
+      #If it is not our replica
       replicaList = shard_store[id]
       request.put('http://' +replicaList[0]+'/key-store-view?replace_store', json_body)
 
