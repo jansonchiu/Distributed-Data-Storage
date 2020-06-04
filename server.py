@@ -235,15 +235,13 @@ def handle_KV_request(key):
             response = requests.put(forwardUrl, json = request.json)
             return response.content, response.status_code
         else:
-          # received broadcast request.
-          vector_clock = get_incremented_clock(request.json.get('causal-metadata'), socket_addr)
+          # received broadcast/forwarded request.
+          vector_clock = get_incremented_clock(vector_clock, socket_addr)
           if requestShardID == this_shard_id:
-            if sender_addr not in shard_store.get(this_shard_id):
+            if sender_addr not in shard_store.get(requestShardID):
               # received forwarded request - broadcast within shard
               broadcast_request('PUT', '/key-value-store/' + key, request.json, True)
             return put_key(key, request)
-          else:
-            return "updating vector clock only"
     elif request.method == 'DELETE':
       if sender_addr not in replica_store:
         if requestShardID == this_shard_id:
@@ -266,8 +264,6 @@ def handle_KV_request(key):
             # received forwarded request - broadcast within shard
             broadcast_request('DELETE', '/key-value-store/' + key, request.json, True)
           return delete_key(key, request)
-        else:
-          return "updating vector clock only"
   # Should queue
   else:
     queue_request(key, request.json, request.method)
