@@ -202,14 +202,16 @@ def handle_KV_request(key):
   global vector_clock
   global shard_store
   requestShardID = key_to_shard_id(key)
+  findNodeInShard = shard_store.get(requestShardID)
+  firstReplicaInShard = findNodeInShard[0]
   print(requestShardID, file=sys.stderr)
   if request.method == 'GET':
     if requestShardID == this_shard_id:
       return get_key(key)
     else:
       # Forward to first replica in appropriate shard id.
-      findNodeInShard = shard_store.get(requestShardID)
-      firstReplicaInShard = findNodeInShard[0]
+      # findNodeInShard = shard_store.get(requestShardID)
+      # firstReplicaInShard = findNodeInShard[0]
       forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
       response = requests.get(forwardUrl)
       return response.content, response.status_code
@@ -226,19 +228,25 @@ def handle_KV_request(key):
             return put_key(key, request)
           else:
             # Forward to first replica in appropriate shard id.
-            findNodeInShard = shard_store.get(requestShardID)
-            firstReplicaInShard = findNodeInShard[0]
+            # findNodeInShard = shard_store.get(requestShardID)
+            # firstReplicaInShard = findNodeInShard[0]
             forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
             response = requests.put(forwardUrl, json = request.json)
+            vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
             return response.content, response.status_code
         else:
           # received broadcast/forwarded request.
-          vector_clock = get_incremented_clock(vector_clock, socket_addr)
           if requestShardID == this_shard_id:
             if sender_addr not in shard_store.get(requestShardID):
+              vector_clock = get_incremented_clock(vector_clock, socket_addr)
               # received forwarded request - broadcast within shard
               broadcast_request('PUT', '/key-value-store/' + key, request.json, True)
+            else:
+              vector_clock = get_incremented_clock(vector_clock, sender_addr)
             return put_key(key, request)
+          else:
+            vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
+            return "updating vector clock only"
     elif request.method == 'DELETE':
       if sender_addr not in replica_store:
         if requestShardID == this_shard_id:
@@ -248,19 +256,25 @@ def handle_KV_request(key):
           return delete_key(key, request)
         else:
           # Forward to first replica in appropriate shard id.
-          findNodeInShard = shard_store.get(requestShardID)
-          firstReplicaInShard = findNodeInShard[0]
+          # findNodeInShard = shard_store.get(requestShardID)
+          # firstReplicaInShard = findNodeInShard[0]
           forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
           response = requests.delete(forwardUrl)
+          vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
           return response.content, response.status_code
       else:
         # received broadcast/forwarded request.
-        vector_clock = get_incremented_clock(vector_clock, socket_addr)
         if requestShardID == this_shard_id:
           if sender_addr not in shard_store.get(this_shard_id):
+            vector_clock = get_incremented_clock(vector_clock, socket_addr)
             # received forwarded request - broadcast within shard
             broadcast_request('DELETE', '/key-value-store/' + key, request.json, True)
+          else:
+            vector_clock = get_incremented_clock(vector_clock, sender_addr)
           return delete_key(key, request)
+        else:
+          vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
+          return "updating vector clock only"
   # Should queue
   else:
     queue_request(key, request.json, request.method)
