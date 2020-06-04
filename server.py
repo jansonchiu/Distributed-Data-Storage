@@ -94,7 +94,7 @@ def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_re
         if request_type == 'DELETE':
           response = requests.delete(forward_url, json=json_body)
       except Exception as e:
-        pass
+        print("Fail to broadcast to ", forward_url, " with ", request_type, file=sys.stderr)
 
 # Replica View Routes
 @api.route('/key-value-store-view', methods = ['GET', 'PUT', 'DELETE'])
@@ -190,9 +190,11 @@ def handle_interal_catch_up():
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
 def handle_KV_request(key):
-  global vector_clock
-  global shard_store
+  global vector_clock, shard_store
+
   requestShardID = key_to_shard_id(key)
+
+  # GET request isn't concerned with causality.
   if request.method == 'GET':
     if requestShardID == this_shard_id:
       return get_key(key)
@@ -202,42 +204,33 @@ def handle_KV_request(key):
       forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
       response = requests.get(forwardUrl)
       return response.content, response.status_code
-  elif request.method == 'PUT':
-    if requestShardID == this_shard_id:
-      sender_addr = request.remote_addr+':8085' # hard-coded port number
-      metadata = request.json.get('causal-metadata')
-      # Should process
-      if is_next_operation(metadata):
-        if request.method == 'PUT':
-          if sender_addr not in replica_store:
-            # Broadcast if the request is from client.
-            broadcast_request('PUT', '/key-value-store/' + key, request.json, True)
-            vector_clock = get_incremented_clock(vector_clock, socket_addr)
-          else:
-            vector_clock = get_incremented_clock(metadata, sender_addr)
-          return put_key(key, request)
-    else:
-      findNodeInShard = shard_store.get(requestShardID)
-      firstReplicaInShard = findNodeInShard[0]
-      forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
-      response = requests.put(forwardUrl, json = request.json)
-      return response.content, response.status_code
-  elif request.method == 'DELETE':
-    if requestShardID == this_shard_id:
-      # Broadcast if the request is from client.
-      if sender_addr not in replica_store:
-        broadcast_request('DELETE', '/key-value-store/' + key, request.json, True)
-        vectorClock = get_incremented_clock(vectorClock, socket_addr)
-      else:
-        vector_clock = get_incremented_clock(vector_clock, socket_addr)
-      return delete_key(key, request)
-    else:
-      findNodeInShard = shard_store.get(requestShardID)
-      firstReplicaInShard = findNodeInShard.get(0)
-      forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
-      response = requests.delete(forwardUrl)
-      return response.content, response.status_code
 
+  sender_addr = request.remote_addr+':8085' # hard-coded port number
+  metadata = request.json.get('causal-metadata')
+  # Should process
+  if is_next_operation(metadata):
+    # Same shard, process and broadcast to other nodes in shard.
+    if requestShardID == this_shard_id:
+      if request.method == 'PUT':
+        # Broadcast within shard if the request is from client, or node from another shard.
+        if sender_addr not in shard_store.get(this_shard_id):
+          broadcast_request('PUT', '/key-value-store/' + key, request.json, True)
+          vector_clock = get_incremented_clock(vector_clock, socket_addr)
+        else:
+          vector_clock = get_incremented_clock(metadata, sender_addr)
+        return put_key(key, request)
+      elif request.method == 'DELETE':
+        pass
+    # Diff shard, forward.
+    else:
+      if request.method == 'PUT':
+        findNodeInShard = shard_store.get(requestShardID)
+        firstReplicaInShard = findNodeInShard[0]
+        forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
+        response = requests.put(forwardUrl, json = request.json)
+        return response.content, response.status_code
+      elif request.method == 'DELETE':
+        pass
   # Should queue
   else:
     queue_request(key, request.json, request.method)
