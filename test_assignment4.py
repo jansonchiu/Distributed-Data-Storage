@@ -1,4 +1,4 @@
-################### 
+###################
 # Course: CSE138
 # Date: Spring 2020
 # Assignment: 4
@@ -111,6 +111,7 @@ class TestHW3(unittest.TestCase):
     print("\n###################### Creating the subnet ######################\n")
     # remove the subnet possibly created from the previous run
     removeSubnet(subnetName)
+    removeSubnet("mynet")
 
     # create subnet
     createSubnet(subnetAddress, subnetName)
