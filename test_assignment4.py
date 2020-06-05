@@ -484,6 +484,7 @@ class TestHW3(unittest.TestCase):
             stopAndRemoveInstance("node" + str(i))
         print("Cleaning up", subnetName, "...")
         removeSubnet(subnetName)
+        createSubnet("mynet")
         print("Done cleaning up.")
 
 if __name__ == '__main__':
