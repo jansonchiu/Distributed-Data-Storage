@@ -6,18 +6,15 @@ Adding a Node to a Shard
 - Whichever node that receives a client request to add a new node to a shard, updates the local shard store, broadcasts the addition to all existing nodes, and sends the current key-value store to the new node.
 
 Causal Consistency
-- Whichever node that receives a client request, first checks if the request should be processed or queued. If it should be processed, then the node processes it, updates the VC, and broadcasts the updated VC to all nodes of all shards. If it should be queued, then the node queues it, and only does those steps after the request can be popped from the queue and processed.
+- Whichever node that receives a client request, first checks if the request should be processed or queued. If it should be processed, then the node processes it, updates the VC, and broadcasts the updated VC to all nodes of all shards. If it should be queued, then the node queues it, and only does those steps after the request can be popped from the queue and processed. The updated vector clock of each request is also forwarded to all nodes within the network, but each PUT/DELETE operation is forwarded within the shard for a causally-consistent key-value store.
 
 Resharding
-- Get the number of shards
-- Create the new number of shards based on node count
-- Since the resharding was local, we broadcast put request that tells all the other replicas to reshard.
-- We make a for loop to go through the store and it checks if maps the key to a shard id.
-- If the key’s associated shard id is not the current shard’s id,
-- The request will be forwarded to one of the replicas in the respective shard’s key value store.
-- After we forward the request, we delete it from the local store and check all the other replicas to delete the key if it is not part of the shard.
-- If the key is in the right current shard id,
-- It will delete the key from all the other shards that it is present.
-- It then checks if the key is where it is supposed to be in the remaining shards.
-- It is checked by seeing if the key belongs to another store or the local store.
-- After this process is done, it forwards the shard store to every other shard to make sure that it is correct.
+- Get the number of shards from the provided request
+- Re-initialize our shards using the aforementioned algorithm ("Creating Shards") locally with new shard count
+- Broadcast a request to have all other replicas re-initialize their shard store based on the new shard count
+
+- Iterate through all the keys in the current replica and check whether that key belongs in the current re-initialized shard. If so, delete it from all other shards in the new shard store. If not, send the key to the correct shard in the new shard store  and delete the key locally. Then, also delete the key in all other shards in the newly-initialized shard store
+
+- Then, iterate through all other shards in the pre-initialized shard store, retrieve their local store, iterate through every key in that store, and check if it belongs in that specific shard. If so, delete that key from all other shards in the newly-initialized shard store. If not (the key does not belong in that shard), move the key to the shard that it appropriately belongs to. For example, if the key belongs in the current replica's shard, then assign it locally and delete that key (repetitively) from all other shards in the newly-initialized shard store. If the key does not belong in the current replica's shard, forward it to the correct shard and also delete it from all other shards in the (again) newly-initialized shard store.
+
+- Because updating new keys within shard only occurs within one specific shard, broadcast that specific store to all other replicas within that respective shard for a holistically consistent view.
