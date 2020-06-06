@@ -33,6 +33,7 @@ def initialize_shard():
     return
 
   global shard_store, this_shard_id
+  shard_store.clear()
   for i in range(len(replica_store)):
     id = i % (int)(shard_count_env)
     this_replica = replica_store[i]
@@ -97,18 +98,31 @@ def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_re
 # Replica View Routes
 @api.route('/key-value-store-view', methods = ['GET', 'PUT', 'DELETE'])
 def view():
-  global store, vector_clock
+  global store, vector_clock, shard_store
   if request.method == 'GET':
     return get_view(request.args)
   elif request.method == 'PUT':
-    if 'replace_store' in request.args:
-      store = request.json.get('store')
+    if 'reshard' in request.args:
+      os.environ["SHARD_COUNT"] = str(request.json.get('shard-count'))
+      initialize_shard()
+      return json.dumps({'message': 'Resharding broadcast handled successfully'}), 200
     elif 'increment' in request.args:
       vector_clock = get_incremented_clock(vector_clock, request.json.get('forwarded-address'))
+      return json.dumps({'message': 'Vector clock updated successfully', 'store': store}), 200
+    elif 'put_key' in request.args:
+      store[request.json.get('key')] = request.json.get('value')
+      return json.dumps({'message': 'Key added successfully', 'store': store}), 200
+    elif 'put_store' in request.args:
+      store = request.json.get('store')
+      return json.dumps({'message': 'Store updated successfully', 'store': store}), 200
     else:
       return put_view(request.json.get('socket-address'))
   elif request.method == 'DELETE':
-    return delete_view(request.json.get('socket-address'))
+    if 'delete_key' in request.args:
+      del store[request.json.get('key')]
+      return json.dumps({'message': 'Key deleted successfully', 'store': store}), 200
+    else:
+      return delete_view(request.json.get('socket-address'))
 
 def get_view(params):
   global replica_store
@@ -214,7 +228,6 @@ def handle_KV_request(key):
   requestShardID = key_to_shard_id(key)
   findNodeInShard = shard_store.get(requestShardID)
   firstReplicaInShard = findNodeInShard[0]
-  print(requestShardID, file=sys.stderr)
   if request.method == 'GET':
     if requestShardID == this_shard_id:
       return get_key(key)
@@ -349,58 +362,72 @@ def key_to_shard_id(key):
   return shard_id
 
 def reshard(shard_count):
-  global shard_store, replica_store, this_shard_id, store
-  # make a copy of shard_store
-  this_shard_id = shard_count
-  shard_store_old = shard_store.copy()
+  global shard_store, this_shard_id, store
+  os.environ["SHARD_COUNT"] = str(shard_count)
+  old_shard_store = shard_store.copy()
+  old_store = store.copy()
 
-  # initialize copied shard_store with new keys
-  #   redistribute replicaIDs into new shardIDs
+  initialize_shard()
+  json_body = { 'shard-count': shard_count }
+  broadcast_request('PUT', '/key-value-store-view?reshard', json_body)
 
-  for i in range(len(replica_store)):
-    id = i % shard_count
-    this_replica = replica_store[i]
+  for key in old_store:
+    if key_to_shard_id(key) != this_shard_id:
+      proper_addr = shard_store[key_to_shard_id(key)][0]
+      json_body = {'key': key, 'value': store[key]}
+      requests.put('http://' + proper_addr  + '/key-value-store-view?put_key', json=json_body)
 
-    if this_replica == socket_addr:
-      this_shard_id = id
-    shard_store.setdefault(id, []).append(this_replica)
-
-  # detect which have been added or removed from this shardID from 0 to len(shard_store)
-  key_shard_map = {}
-
-  # This adds all the keys to the respective shardID
-  #Refactor: Can also request store from every repica in other shards
-  for k in store.keys():
-    id = key_to_shard_id(k)
-    key_shard_map.setdefault(id, []).append((k, store[k]))
-
-  #remove and populate all kvs of replicas in the shard
-
-  for id in shard_store:
-    #Creates a new store for the shard_id
-    print("id: ", id)
-    ListOfShardTuples = key_shard_map.get(id)
-    print("ListOfShardTuples: ", ListOfShardTuples)
-    store_to_be_added = {}
-    for k in ListOfShardTuples:
-      for a, b in k:
-        store_to_be_added.set(a,b)
-    json_body = { 'store': store_to_be_added }
-    # Check if it is our shard, so we can change locally
-    if id == this_shard_id:
-      store = store_to_be_added
-      broadcast_request('PUT', '/key-value-store?replace_store', json_body, True)
+      del store[key]
+      for shard_id in shard_store:
+        if shard_id != this_shard_id and shard_id != key_to_shard_id(key):
+          replica_addr =  shard_store[shard_id][0]
+          requests.delete('http://' + replica_addr + '/key-value-store-view?delete_key', json={'key': key})
     else:
-      #If it is not our replica
-      replicaList = shard_store[id]
-      request.put('http://' +replicaList[0]+'/key-store-view?replace_store', json_body)
+      for shard_id in shard_store:
+        if shard_id != this_shard_id:
+          replica_addr =  shard_store[shard_id][0]
+          requests.delete('http://' + replica_addr + '/key-value-store-view?delete_key', json={'key': key})
 
-  # for all the shards that been removed
-  #   delete all key from this (current) shardID
-          #   override current  keys from replicas with keys from new shardID
-  # for all the shards that have added to this shardID
-  #   copy current replica store and override on newly added replicas
-  pass
+  for shard_id in old_shard_store:
+    if shard_id != this_shard_id:
+      replica_addr = old_shard_store[shard_id][0]
+      response = requests.get('http://' + replica_addr + '/key-value-store-view?store')
+      some_store = response.json().get('store')
+
+      for key in some_store:
+        proper_shard = key_to_shard_id(key)
+        if proper_shard != shard_id:
+          if proper_shard == this_shard_id:
+            store[key] = some_store[key]
+
+            for some_shard_id in shard_store:
+              if some_shard_id != this_shard_id:
+                replica_addr =  shard_store[some_shard_id][0]
+                requests.delete('http://' + replica_addr + '/key-value-store-view?delete_key', json={'key': key})
+          else:
+            proper_replica = shard_store[proper_shard][0]
+            json_body = {'key': key, 'value': some_store[key]}
+            requests.put('http://' + proper_replica  + '/key-value-store-view?put_key', json=json_body)
+
+            for other_shard_id in shard_store:
+              if other_shard_id != proper_shard:
+                replica_addr =  shard_store[other_shard_id][0]
+                requests.delete('http://' + replica_addr + '/key-value-store-view?delete_key', json={'key': key})
+        else:
+          for another_shard_id in shard_store:
+            if another_shard_id != shard_id:
+              replica_addr =  shard_store[another_shard_id][0]
+              requests.delete('http://' + replica_addr + '/key-value-store-view?delete_key', json={'key': key})
+
+  for this_stupid_shard_id in shard_store:
+    first_replica = shard_store[this_stupid_shard_id][0]
+    response = requests.get('http://' + first_replica + '/key-value-store-view?store')
+    forwarding_store = response.json().get('store')
+
+    for another_replica in shard_store[this_stupid_shard_id]:
+      if another_replica != first_replica:
+        json_body = {'store': forwarding_store}
+        requests.put('http://' + another_replica  + '/key-value-store-view?put_store', json=json_body)
 
 def queue_request(key, req, method):
   queue.append(json.dumps({'key': key, 'request': req, 'method': method}))
@@ -466,5 +493,5 @@ if __name__ == '__main__':
   # polling_vector_clock_thread.start()
   # polling_vector_clock.join() # This won't execute because thread is infinite, so it'll never end.
 
-  api.run(host='0.0.0.0', port=8085, debug=True)
+  api.run(host='0.0.0.0', port=8085, debug=True, use_reloader=False)
 
