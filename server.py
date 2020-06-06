@@ -119,7 +119,7 @@ def view():
       return put_view(request.json.get('socket-address'))
   elif request.method == 'DELETE':
     if 'delete_key' in request.args:
-      del store[request.json.get('key')]
+      store.pop(request.json.get('key'), None)
       return json.dumps({'message': 'Key deleted successfully', 'store': store}), 200
     else:
       return delete_view(request.json.get('socket-address'))
@@ -371,6 +371,7 @@ def reshard(shard_count):
   json_body = { 'shard-count': shard_count }
   broadcast_request('PUT', '/key-value-store-view?reshard', json_body)
 
+  # sends kv's no longer assigned to this shard
   for key in old_store:
     if key_to_shard_id(key) != this_shard_id:
       proper_addr = shard_store[key_to_shard_id(key)][0]
@@ -378,6 +379,7 @@ def reshard(shard_count):
       requests.put('http://' + proper_addr  + '/key-value-store-view?put_key', json=json_body)
 
       del store[key]
+      # send delete requests to other replicas based on new shard id's
       for shard_id in shard_store:
         if shard_id != this_shard_id and shard_id != key_to_shard_id(key):
           replica_addr =  shard_store[shard_id][0]
@@ -390,21 +392,24 @@ def reshard(shard_count):
 
   for shard_id in old_shard_store:
     if shard_id != this_shard_id:
+      # get stores from replicas of different old shard ids
       replica_addr = old_shard_store[shard_id][0]
       response = requests.get('http://' + replica_addr + '/key-value-store-view?store')
       some_store = response.json().get('store')
 
+      # adds keys that now belong to this shard
       for key in some_store:
         proper_shard = key_to_shard_id(key)
         if proper_shard != shard_id:
           if proper_shard == this_shard_id:
             store[key] = some_store[key]
-
+            # if key now assigned to this shard, request delete in old shard
             for some_shard_id in shard_store:
               if some_shard_id != this_shard_id:
                 replica_addr =  shard_store[some_shard_id][0]
                 requests.delete('http://' + replica_addr + '/key-value-store-view?delete_key', json={'key': key})
           else:
+            # move key to a different new shard
             proper_replica = shard_store[proper_shard][0]
             json_body = {'key': key, 'value': some_store[key]}
             requests.put('http://' + proper_replica  + '/key-value-store-view?put_key', json=json_body)
