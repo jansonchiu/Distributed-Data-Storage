@@ -1,4 +1,4 @@
-Janson Chiu:
-Melanie Wong:
-Timothy Nguyen:  Created algorithm to initialize shard_store and reshard all replicas, created route to retrieve shard ID of some replica, tested and debugged causal consistency primitives, team communication and synchronization.
+Janson: I worked developing the algorithm to shard and reshard, also worked on debugging the code.  
+Melanie: Worked on creating shards, implemented route to get key counts from shards, 
+Tim: Helped create algorithm to initialize shard_store, created route to retrieve shard ID of some replica, team communication and synchronization
 Ran Tao: Worked on adding a node to a shard.
