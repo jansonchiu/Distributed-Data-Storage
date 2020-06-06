@@ -1,0 +1,7 @@
+Terms:
+* Shard store: A dictionary that maps shard IDs to node socket addresses.
+
+Adding a node to a shard is implemented in this way. Whichever node that receives a client request to add a new node to a shard, updates the local shard store, broadcast the addition to all existing nodes, and send the current key-value store to the new node.
+
+Causal consistency is implemented in this way. Whichever node that receives a client request, first checks if the request should be processed or queued. If it should be processed, then the node processes it, updates the VC, and broadcast the updated VC to all nodes of all shards. If it should be queued, then the node queues it, and only does those steps after the request can be popped from the queue and processed.
+
