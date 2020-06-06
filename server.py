@@ -2,6 +2,7 @@
 from hashlib import md5
 from flask import Flask, json, request, jsonify
 import os, sys, requests, threading, time
+import random
 
 api = Flask(__name__)
 
@@ -180,8 +181,8 @@ def handle_shard_request_with_num(shard_op, shard_num):
       return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
     else:
       findNodeInShard = shard_store.get(shard_id)
-      firstReplicaInShard = findNodeInShard[0]
-      forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store-shard/shard-id-key-count/'+ shard_num
+      altShard = findNodeInShard[random.randint(0, len(findNodeInShard)-1)]
+      forwardUrl = 'http://' + altShard + '/key-value-store-shard/shard-id-key-count/'+ shard_num
       print('fwd url', forwardUrl)
       response = requests.get(forwardUrl)
       return response.content, response.status_code
@@ -227,13 +228,13 @@ def handle_KV_request(key):
   global shard_store
   requestShardID = key_to_shard_id(key)
   findNodeInShard = shard_store.get(requestShardID)
-  firstReplicaInShard = findNodeInShard[0]
+  altShard = findNodeInShard[random.randint(0, len(findNodeInShard)-1)]
   if request.method == 'GET':
     if requestShardID == this_shard_id:
       return get_key(key)
     else:
       # Forward to first replica in appropriate shard id.
-      forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
+      forwardUrl = 'http://' + altShard + '/key-value-store/'+ key
       response = requests.get(forwardUrl)
       return response.content, response.status_code
   sender_addr = request.remote_addr+':8085' # hard-coded port number
@@ -249,10 +250,10 @@ def handle_KV_request(key):
             return put_key(key, request)
           else:
             # Forward to first replica in appropriate shard id.
-            forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
+            forwardUrl = 'http://' + altShard + '/key-value-store/'+ key
             response = requests.put(forwardUrl, json = request.json)
-            vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
-            broadcast_request('PUT', '/key-value-store-view?increment', {'forwarded-address': firstReplicaInShard}, True)
+            vector_clock = get_incremented_clock(vector_clock, altShard)
+            broadcast_request('PUT', '/key-value-store-view?increment', {'forwarded-address': altShard}, True)
             return response.content, response.status_code
         else:
           # received broadcast/forwarded request.
@@ -276,9 +277,9 @@ def handle_KV_request(key):
           return delete_key(key, request)
         else:
           # Forward to first replica in appropriate shard id.
-          forwardUrl = 'http://' + firstReplicaInShard + '/key-value-store/'+ key
+          forwardUrl = 'http://' + altShard + '/key-value-store/'+ key
           response = requests.delete(forwardUrl)
-          vector_clock = get_incremented_clock(vector_clock, firstReplicaInShard)
+          vector_clock = get_incremented_clock(vector_clock, altShard)
           return response.content, response.status_code
       else:
         # received broadcast/forwarded request.
@@ -413,7 +414,7 @@ def reshard(shard_count):
             proper_replica = shard_store[proper_shard][0]
             json_body = {'key': key, 'value': some_store[key]}
             requests.put('http://' + proper_replica  + '/key-value-store-view?put_key', json=json_body)
-
+            # delete keys in other replicas based on new id
             for other_shard_id in shard_store:
               if other_shard_id != proper_shard:
                 replica_addr =  shard_store[other_shard_id][0]
