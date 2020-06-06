@@ -485,13 +485,5 @@ def get_incremented_clock(vector_clock, addr):
 if __name__ == '__main__':
   initialize_view()
   initialize_shard()
-  # polling_replica_thread = threading.Thread(target=poll_replicas)
-  # polling_replica_thread.start()
-  # polling_replica_thread.join() # This won't execute because thread is infinite, so it'll never end.
-
-  # polling_vector_clock_thread = threading.Thread(target=poll_vector_clock)
-  # polling_vector_clock_thread.start()
-  # polling_vector_clock.join() # This won't execute because thread is infinite, so it'll never end.
-
   api.run(host='0.0.0.0', port=8085, debug=True, use_reloader=False)
 
