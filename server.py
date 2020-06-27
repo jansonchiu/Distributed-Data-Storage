@@ -16,32 +16,29 @@ shard_store = {}
 this_shard_id = None
 
 socket_addr = os.environ.get('SOCKET_ADDRESS')
-default_view_str = os.environ.get('VIEW')
-default_view = default_view_str.split(',')
+default_view = os.environ.get('VIEW').split(',')
 
-# Initialization Method
+# Initializes the local replica store based on the corresponding environment variable
+# Then broadcasts to add new replica to replica store if not apart of default view
 def initialize_view():
   global replica_store
   replica_store = default_view
   json_body = { 'socket-address': socket_addr }
   broadcast_request('PUT', '/key-value-store-view', json_body) # Weird bug - two PUT requests are sent?
 
+# Initializes the local shard store by assigning replica to shard iteratively/linearly
+# Also sets a localized shard ID if specified
 def initialize_shard():
-  # Don't initialize shard store if SHARD_COUNT env var is none,
-  # Which can happen if it's a newly added node.
-  shard_count_env = os.environ.get('SHARD_COUNT')
-  if (shard_count_env is None):
-    return
-
   global shard_store, this_shard_id
-  shard_store.clear()
-  for i in range(len(replica_store)):
-    id = i % (int)(shard_count_env)
-    this_replica = replica_store[i]
+  if 'SHARD_COUNT' in os.environ:
+    shard_store.clear()
+    for i in range(len(replica_store)):
+      shard_id = i % (int)(os.environ.get('SHARD_COUNT'))
+      this_replica = replica_store[i]
 
-    if this_replica == socket_addr:
-      this_shard_id = id
-    shard_store.setdefault(id, []).append(this_replica)
+      if this_replica == socket_addr:
+        this_shard_id = shard_id
+      shard_store.setdefault(shard_id, []).append(this_replica)
 
 # Polling Other Replicas
 def poll_replicas():
