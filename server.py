@@ -18,6 +18,11 @@ this_shard_id = None
 socket_addr = os.environ.get('SOCKET_ADDRESS')
 default_view = os.environ.get('VIEW').split(',')
 
+# docker network create --subnet=10.10.0.0/16 mynet
+# docker build -t assignment4-img .
+# docker run -p 8082:8085 --net=mynet --ip=10.10.0.2 --name="node1" -e SOCKET_ADDRESS="10.10.0.2:8085"-e VIEW="10.10.0.2:8085,10.10.0.3:8085,10.10.0.4:8085,10.10.0.5:8085,10.10.0.6:8085,10.10.0.7:8085" -e SHARD_COUNT="2" assignment4-img
+
+
 # Initializes the local replica store based on the corresponding environment variable
 # Then broadcasts to add new replica to replica store if not apart of default view
 def initialize_view():
@@ -40,29 +45,28 @@ def initialize_shard():
         this_shard_id = shard_id
       shard_store.setdefault(shard_id, []).append(this_replica)
 
-# Polling Other Replicas
+# Polls all other replicas for availability and broadcasts deletion request if replica is not available
 def poll_replicas():
   while True:
-    global replica_store
-    time.sleep(5)
     for replica_addr in default_view:
       if replica_addr != socket_addr:
-        forward_url = 'http://' + replica_addr + '/key-value-store-view'
+        forward_url = 'http://' + replica_addr + '/internal'
         try:
           response = requests.get(forward_url)
         # except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, ConnectionRefusedError):
         except:
           delete_view(replica_addr)
           json_body = { 'socket-address': replica_addr }
-          broadcast_request('DELETE', '/key-value-store-view', json_body)
+          broadcast_request('DELETE', '/key-value-store-view', json_body) # Safety measure
+    time.sleep(5)
 
+# Polls all other replicas and their vector clocks for causal consistency
 def poll_vector_clock():
+  global vector_clock, store
   while True:
-    time.sleep(1)
-    global vector_clock, store
     for replica_addr in default_view:
       if replica_addr != socket_addr:
-        forward_url = 'http://' + replica_addr + '/key-value-store-view?clock'
+        forward_url = 'http://' + replica_addr + '/internal?clock'
         try:
           response = requests.get(forward_url, timeout=1)
           remote_vector_clock = response.json().get('vector_clock')
@@ -72,11 +76,11 @@ def poll_vector_clock():
               vector_clock = remote_vector_clock
               check_queue()
         except:
-          pass
+          continue
+    time.sleep(1)
 
 # Broadcast Message
 def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_replicas=False):
-  local_store = None
   if to_shard_replicas:
     local_store = shard_store[this_shard_id]
   else:
@@ -90,8 +94,16 @@ def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_re
           response = requests.put(forward_url, json=json_body)
         if request_type == 'DELETE':
           response = requests.delete(forward_url, json=json_body)
-      except Exception as e:
+      except:
         pass
+
+# Internal route to manipulate or retrieve local variables
+@api.route('/internal', methods=['GET', 'PUT', 'DELETE'])
+def internal():
+  if 'clock' in request.args:
+    return json.dumps({'vector_clock': vector_clock}), 200
+  else:
+    return json.dumps({'message': 'I am alive!'}), 200
 
 # Replica View Routes
 @api.route('/key-value-store-view', methods = ['GET', 'PUT', 'DELETE'])
@@ -126,8 +138,6 @@ def get_view(params):
   global replica_store
   if 'store' in params:
     return json.dumps({'message': 'Store retrieved successfully', 'store': store}), 200
-  elif 'clock' in params:
-    return json.dumps({'vector_clock': vector_clock, 'store': store}), 200
   else:
     return json.dumps({'message': 'View retrieved successfully', 'view': replica_store}), 200
 
