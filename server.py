@@ -114,12 +114,12 @@ def internal():
     store = request.json.get('store')
     return json.dumps({'message': 'Store updated successfully'}), 200
   elif 'update_store' in request.args:
-    for replica_addr in shard_store[this_shard_id]
+    for replica_addr in shard_store[this_shard_id]:
       if replica_addr != socket_addr:
         neighbor_node = replica_addr
         break
     store = requests.get('http://' + neighbor_node + '/internal?store').json().get('store')
-  return "Updated.", 200
+    return json.dumps({'message': 'Store initialized successfully'}), 200
   elif 'increment' in request.args:
     vector_clock = get_incremented_clock(vector_clock, request.json.get('forwarded-address'))
     return json.dumps({'message': 'Vector clock updated successfully'}), 200
@@ -181,7 +181,7 @@ def handle_shard_request_with_num(shard_op, shard_num):
     new_node_ip = request.json.get('socket-address')
     shard_store[shard_id].append(new_node_ip)
 
-    if request.remote_addr+':8085' is not in replica_store:
+    if not request.remote_addr+':8085' in replica_store:
       broadcast_request('PUT', '/key-value-store-shard/add-member/' + shard_num, request.json)
       requests.put('http://' + new_node_ip + '/internal?reshard', json={'shard-count': shard_num})
       requests.get('http://' + new_node_ip + '/internal?update_store')
@@ -202,10 +202,10 @@ def handle_shard_request_with_num(shard_op, shard_num):
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
 def handle_KV_request(key):
   global vector_clock
-  global shard_store
   requestShardID = key_to_shard_id(key)
   findNodeInShard = shard_store.get(requestShardID)
   altShard = findNodeInShard[random.randint(0, len(findNodeInShard)-1)]
+
   if request.method == 'GET':
     if requestShardID == this_shard_id:
       return get_key(key)
@@ -216,6 +216,7 @@ def handle_KV_request(key):
       return response.content, response.status_code
   sender_addr = request.remote_addr+':8085' # hard-coded port number
   metadata = request.json.get('causal-metadata')
+
   if is_next_operation(metadata):
     if request.method == 'PUT':
         # Should process
@@ -271,14 +272,14 @@ def handle_KV_request(key):
         else:
           vector_clock = get_incremented_clock(vector_clock, sender_addr)
           return json.dumps({'message': 'updated vector clock only', 'causal-metadata': vector_clock, 'shard-id': this_shard_id}), 200
+
   # Should queue
   else:
-    queue_request(key, request.json, request.method)
+    queue.append({'key': key, 'request': request.json, 'method': request.method})
     vector_clock_for_client = get_incremented_clock(metadata, socket_addr)
     return json.dumps({'causal-metadata': vector_clock_for_client, 'message': 'Request is queued, please wait...'}), 202
 
 def get_key(key):
-  global vector_clock
   if key in store:
     return json.dumps({'doesExist': True, 'causal-metadata': vector_clock, 'message': 'Retrieved successfully', 'value': store[key]}), 200
   else:
@@ -291,8 +292,6 @@ def put_key(key, request):
   elif len(key) > 50:
     return json.dumps({'error': 'Key is too long', 'message': 'Error in PUT'}), 400
 
-  global vector_clock
-  # Set response body based on if it's a adding or updating a key.
   if store.get(key) is None:
     store[key] = value
     check_queue()
@@ -304,7 +303,6 @@ def put_key(key, request):
 
 def delete_key(key, request):
   global vector_clock
-  response_body = {}
   if key in store:
     del store[key]
     check_queue()
@@ -315,23 +313,20 @@ def delete_key(key, request):
     vector_clock = get_incremented_clock(vector_clock, socket_addr)
     return json.dumps({'message': 'Error in DELETE', 'doesExist': False, 'error': 'Key does not exist', 'causal-metadata': vector_clock}), 404
 
-def is_next_operation(metadata):
-  if len(metadata) == 0:
+def is_next_operation(causal_metadata):
+  if len(causal_metadata) == 0:
     return True
   else:
-    return is_causally_independent(metadata)
+    return is_causally_independent(causal_metadata)
 
-def is_causally_independent(metadata):
-  if socket_addr in vector_clock and socket_addr in metadata:
-    if vector_clock[socket_addr] != metadata[socket_addr]:
+def is_causally_independent(causal_metadata):
+  if socket_addr in vector_clock and socket_addr in causal_metadata and vector_clock[socket_addr] != causal_metadata[socket_addr]:
       return False
-  for key in metadata:
-    if not key in vector_clock:  # Existent key > non-existent key
-      return False
-    if metadata[key] > vector_clock[key]:
-      return False
-
-  return True
+  else:
+    for key in causal_metadata:
+      if not key in vector_clock or causal_metadata[key] > vector_clock[key]:  # Existent key > non-existent key
+        return False
+    return True
 
 def key_to_shard_id(key):
   hash_value = md5(key.encode('utf-8'))
@@ -412,58 +407,35 @@ def reshard(shard_count):
         json_body = {'store': forwarding_store}
         requests.put('http://' + another_replica  + '/internal?put_store', json=json_body)
 
-def queue_request(key, req, method):
-  queue.append(json.dumps({'key': key, 'request': req, 'method': method}))
-
 def check_queue():
-  global vector_clock, queue
+  global vector_clock
   if len(queue) == 0:
     return
-  else:
-    while True:
-      has_processed = False
-      processed_req_idx = -1
-      for i in range(0, len(queue)):
-        objvector_clock  = json.loads(queue[i]).get('request').get('causal-metadata')
-        if is_causally_independent(objvector_clock):
 
-          # Read the request.
-          msg = json.loads(queue[i])
-          key = msg.get('key')
-          req = msg.get('request')
-          value = req.get('value')
+  for i in range(0, len(queue)):
+    message = queue[i]
+    if is_causally_independent(message.get('request').get('causal-metadata')):
+      if message.get('method') == 'PUT':
+        store[message.get('key')] = message.get('request').get('value')
+      elif message.get('method') == 'DELETE':
+        del store[message.get('key')]
+      broadcast_request(message.get('method'), '/key-value-store/' + key, message.get('request'))
 
-          # Process the request.
-          if msg.get('method') == 'PUT':
-            store[key] = value
-          elif msg.get('method') == 'DELETE':
-            del store[key]
+      vector_clock = get_incremented_clock(message.get('request').get('causal-metadata').copy(), socket_addr)
+      queue.pop(i)
+    else:
+      break
 
-          # Broadcast the request.
-          broadcast_request(msg.get('method'), '/key-value-store/' + key, req.get('json'))
-
-          # Update stuff.
-          vector_clock = get_incremented_clock(objvector_clock.copy(), socket_addr)
-          has_processed = True
-          processed_req_idx = i
-          break
-
-      if has_processed:
-        queue.pop(processed_req_idx)
-      else:
-        break
-
-def get_incremented_clock(vector_clock, addr):
-  result = {}
+def get_incremented_clock(vector_clock, replica_addr):
   if len(vector_clock) == 0:
-    result[addr] = 1
-    return result
-  result = vector_clock.copy()
-  if result.get(addr) is None:
-    result[addr] = 1
+    resulting_vector_clock[replica_addr] = 1
   else:
-    result[addr] += 1
-  return result
+    resulting_vector_clock = vector_clock.copy()
+    if resulting_vector_clock[replica_addr] is None:
+      resulting_vector_clock[replica_addr] = 1
+    else:
+      resulting_vector_clock[replica_addr] += 1
+  return resulting_vector_clock
 
 if __name__ == '__main__':
   initialize_view()
