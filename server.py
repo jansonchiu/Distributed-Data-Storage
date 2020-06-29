@@ -113,6 +113,13 @@ def internal():
   elif 'put_store' in request.args:
     store = request.json.get('store')
     return json.dumps({'message': 'Store updated successfully'}), 200
+  elif 'update_store' in request.args:
+    for replica_addr in shard_store[this_shard_id]
+      if replica_addr != socket_addr:
+        neighbor_node = replica_addr
+        break
+    store = requests.get('http://' + neighbor_node + '/internal?store').json().get('store')
+  return "Updated.", 200
   elif 'increment' in request.args:
     vector_clock = get_incremented_clock(vector_clock, request.json.get('forwarded-address'))
     return json.dumps({'message': 'Vector clock updated successfully'}), 200
@@ -154,7 +161,6 @@ def delete_view(socket_addr):
 # Shard Operation Routes
 @api.route('/key-value-store-shard/<shard_op>', methods=['GET', 'PUT'])
 def handle_shard_request(shard_op):
-  global shard_store
   if shard_op == 'shard-ids':
     return json.dumps({'message': 'Shard IDs retrieved successfully', 'shard-ids': list(shard_store.keys())}), 200
   elif shard_op == 'node-shard-id':
@@ -167,60 +173,30 @@ def handle_shard_request(shard_op):
       reshard(reshard_count)
       return json.dumps({'message': 'Resharding done successfully'}), 200
 
+# Shard Operation Routes with Shard Number
 @api.route('/key-value-store-shard/<shard_op>/<shard_num>', methods=['GET', 'PUT'])
 def handle_shard_request_with_num(shard_op, shard_num):
-  global shard_store
   shard_id = (int)(shard_num)
   if shard_op == 'add-member':
     new_node_ip = request.json.get('socket-address')
     shard_store[shard_id].append(new_node_ip)
-    broadcast_request('PUT', '/internal/add-member', {'new-node-ip': new_node_ip, 'shard-id': shard_id})
-    requests.put('http://' + new_node_ip + '/internal/catch-up', json={'shard-store': shard_store})
-    return "Node added.", 200
+
+    if request.remote_addr+':8085' is not in replica_store:
+      broadcast_request('PUT', '/key-value-store-shard/add-member/' + shard_num, request.json)
+      requests.put('http://' + new_node_ip + '/internal?reshard', json={'shard-count': shard_num})
+      requests.get('http://' + new_node_ip + '/internal?update_store')
+
+    return json.dumps({'message': 'Node successfully added to shard!'}), 200
   elif shard_op == 'shard-id-key-count':
     if shard_id == this_shard_id:
       return json.dumps({'message': 'Key count of shard ID retrieved successfully', 'shard-id-key-count': len(store)}), 200
     else:
-      findNodeInShard = shard_store.get(shard_id)
-      altShard = findNodeInShard[random.randint(0, len(findNodeInShard)-1)]
-      forwardUrl = 'http://' + altShard + '/key-value-store-shard/shard-id-key-count/'+ shard_num
-      print('fwd url', forwardUrl)
-      response = requests.get(forwardUrl)
+      shard_nodes = shard_store.get(shard_id)
+      shard_in_node = shard_nodes[random.randint(0, len(shard_nodes)-1)]
+      response = requests.get('http://' + shard_in_node + '/key-value-store-shard/shard-id-key-count/' + shard_num)
       return response.content, response.status_code
   elif shard_op == 'shard-id-members':
-    if shard_id in shard_store.keys():
-      return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_id)}), 200
-
-# Internal route that handles the broadcast of adding a new node.
-@api.route('/internal/add-member', methods=['PUT'])
-def handle_internal_add_member():
-  new_node_ip = request.json.get('new-node-ip')
-  # Skip if it's about self.
-  if (new_node_ip == socket_addr):
-    return "Skipped.", 200
-  shard_id = request.json.get('shard-id')
-  shard_store[shard_id].append(new_node_ip)
-  return "Added.", 200
-
-# Internal route for a new node to receive the latest shard store.
-@api.route('/internal/catch-up', methods=['PUT'])
-def handle_interal_catch_up():
-  global store, shard_store, this_shard_id
-  json_shard_store = request.json.get('shard-store')
-  for shard_id_str, node_socks in json_shard_store.items():
-    shard_id = (int)(shard_id_str)
-    shard_store[shard_id] = node_socks
-    # Get this_shard_id
-    if socket_addr in node_socks:
-      this_shard_id = shard_id
-  # Get store from the right shard ID.
-  # Not the cleanest. What if first node in the shard is the new node itself?
-  node_from_same_shard = shard_store[this_shard_id][0]
-  # Not clean. Why can store be got from view?
-  url_to_get_store = 'http://' + node_from_same_shard + '/internal?store'
-  #print(requests.get(url_to_get_store), file=sys.stderr)
-  store = requests.get(url_to_get_store).json().get('store')
-  return "Updated.", 200
+    return json.dumps({'message': 'Members of shard ID retrieved successfully', 'shard-id-members': shard_store.get(shard_id)}), 200
 
 # Key-Value Routes
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
@@ -252,7 +228,7 @@ def handle_KV_request(key):
           else:
             # Forward to first replica in appropriate shard id.
             forwardUrl = 'http://' + altShard + '/key-value-store/'+ key
-            response = requests.put(forwardUrl, json = request.json)
+            response = requests.put(forwardUrl, json=request.json)
             vector_clock = get_incremented_clock(vector_clock, altShard)
             broadcast_request('PUT', '/internal?increment', {'forwarded-address': altShard}, True)
             return response.content, response.status_code
@@ -472,7 +448,7 @@ def check_queue():
           processed_req_idx = i
           break
 
-      if (has_processed):
+      if has_processed:
         queue.pop(processed_req_idx)
       else:
         break
