@@ -427,11 +427,13 @@ def check_queue():
       break
 
 def get_incremented_clock(vector_clock, replica_addr):
+  resulting_vector_clock = {}
+
   if len(vector_clock) == 0:
     resulting_vector_clock[replica_addr] = 1
   else:
     resulting_vector_clock = vector_clock.copy()
-    if resulting_vector_clock[replica_addr] is None:
+    if replica_addr not in resulting_vector_clock:
       resulting_vector_clock[replica_addr] = 1
     else:
       resulting_vector_clock[replica_addr] += 1
