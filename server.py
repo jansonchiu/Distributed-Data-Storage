@@ -20,7 +20,7 @@ default_view = os.environ.get('VIEW').split(',')
 
 # docker network create --subnet=10.10.0.0/16 mynet
 # docker build -t assignment4-img .
-# docker run -p 8082:8085 --net=mynet --ip=10.10.0.2 --name="node1" -e SOCKET_ADDRESS="10.10.0.2:8085" -e VIEW="10.10.0.2:8085,10.10.0.3:8085,10.10.0.4:8085,10.10.0.5:8085,10.10.0.6:8085,10.10.0.7:8085" -e SHARD_COUNT="2" assignment4-img
+# docker run -p 8082:8085 --net=mynet --ip=10.10.0.2 --name='node1' -e SOCKET_ADDRESS='10.10.0.2:8085' -e VIEW='10.10.0.2:8085,10.10.0.3:8085,10.10.0.4:8085,10.10.0.5:8085,10.10.0.6:8085,10.10.0.7:8085' -e SHARD_COUNT='2' assignment4-img
 
 
 # Initializes the local replica store based on the corresponding environment variable
@@ -78,7 +78,7 @@ def poll_vector_clock():
           continue
     time.sleep(1)
 
-# Broadcast Message
+# Broadcasts a message globally or within a shard
 def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_replicas=False):
   if to_shard_replicas:
     local_store = shard_store[this_shard_id]
@@ -99,7 +99,7 @@ def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_re
 # Internal route to manipulate or retrieve local variables
 @api.route('/internal', methods=['GET', 'PUT', 'DELETE'])
 def internal():
-  global store, vector_clock
+  global store, vector_clock, shard_store, this_shard_id
   if 'clock' in request.args:
     return json.dumps({'message': 'Clock retrieved successfully', 'clock': vector_clock}), 200
   elif 'store' in request.args:
@@ -119,7 +119,11 @@ def internal():
         neighbor_node = replica_addr
         break
     store = requests.get('http://' + neighbor_node + '/internal?store').json().get('store')
-    return json.dumps({'message': 'Store initialized successfully'}), 200
+    return json.dumps({'message': 'Store updated successfully'}), 200
+  elif 'update_shard_store' in request.args:
+    shard_store = request.json.get('shard-store')
+    this_shard_id = request.json.get('shard-id')
+    return json.dumps({'message': 'Shard store updated successfully'}), 200
   elif 'increment' in request.args:
     vector_clock = get_incremented_clock(vector_clock, request.json.get('forwarded-address'))
     return json.dumps({'message': 'Vector clock updated successfully'}), 200
@@ -178,12 +182,15 @@ def handle_shard_request(shard_op):
 def handle_shard_request_with_num(shard_op, shard_num):
   shard_id = (int)(shard_num)
   if shard_op == 'add-member':
+    if request.json.get('socket-address') == socket_addr:
+      return json.dumps({'message': 'Adding new member skipped on reflexive replica...'})
+
     new_node_ip = request.json.get('socket-address')
     shard_store[shard_id].append(new_node_ip)
 
     if not request.remote_addr+':8085' in replica_store:
       broadcast_request('PUT', '/key-value-store-shard/add-member/' + shard_num, request.json)
-      requests.put('http://' + new_node_ip + '/internal?reshard', json={'shard-count': shard_num})
+      requests.put('http://' + new_node_ip + '/internal?update_shard_store', json={'shard-store': shard_store, 'shard-id': shard_id})
       requests.get('http://' + new_node_ip + '/internal?update_store')
 
     return json.dumps({'message': 'Node successfully added to shard!'}), 200
@@ -202,82 +209,66 @@ def handle_shard_request_with_num(shard_op, shard_num):
 @api.route('/key-value-store/<key>', methods=['GET', 'PUT', 'DELETE'])
 def handle_KV_request(key):
   global vector_clock
-  requestShardID = key_to_shard_id(key)
-  findNodeInShard = shard_store.get(requestShardID)
-  altShard = findNodeInShard[random.randint(0, len(findNodeInShard)-1)]
+  target_shard_id = key_to_shard_id(key)
+  target_shards = shard_store.get(target_shard_id)
+  node_in_shard = target_shards[random.randint(0, len(target_shards)-1)]
 
   if request.method == 'GET':
-    if requestShardID == this_shard_id:
+    if target_shard_id == this_shard_id:
       return get_key(key)
-    else:
-      # Forward to first replica in appropriate shard id.
-      forwardUrl = 'http://' + altShard + '/key-value-store/'+ key
-      response = requests.get(forwardUrl)
+    else: # Forward to first replica in appropriate shard id.
+      forward_url = 'http://' + node_in_shard + '/key-value-store/'+ key
+      response = requests.get(forward_url)
       return response.content, response.status_code
-  sender_addr = request.remote_addr+':8085' # hard-coded port number
-  metadata = request.json.get('causal-metadata')
+  else:
+    sender_addr = request.remote_addr + ':8085' # hard-coded port number
+    metadata = request.json.get('causal-metadata')
 
-  if is_next_operation(metadata):
-    if request.method == 'PUT':
-        # Should process
+    if is_next_operation(metadata):
+      if request.method == 'PUT':
         if sender_addr not in replica_store:
-          if requestShardID == this_shard_id:
-          # Broadcast if the request is from client, and shard id matches.
+          if target_shard_id == this_shard_id: # Broadcast if request is from client to the correct shard
             vector_clock = get_incremented_clock(vector_clock, socket_addr)
             broadcast_request('PUT', '/key-value-store/' + key, request.json)
             return put_key(key, request)
-          else:
-            # Forward to first replica in appropriate shard id.
-            forwardUrl = 'http://' + altShard + '/key-value-store/'+ key
-            response = requests.put(forwardUrl, json=request.json)
-            vector_clock = get_incremented_clock(vector_clock, altShard)
-            broadcast_request('PUT', '/internal?increment', {'forwarded-address': altShard}, True)
+          else: # Forward to first replica in appropriate shard
+            forward_url = 'http://' + node_in_shard + '/key-value-store/'+ key
+            response = requests.put(forward_url, json=request.json)
+            vector_clock = get_incremented_clock(vector_clock, node_in_shard)
+            broadcast_request('PUT', '/internal?increment', {'forwarded-address': node_in_shard}, True)
             return response.content, response.status_code
         else:
-          # received broadcast/forwarded request.
-          if requestShardID == this_shard_id:
-            if sender_addr not in shard_store.get(requestShardID):
+          if target_shard_id == this_shard_id: # Received broadcasted request and modifying locally
+            if sender_addr not in shard_store.get(target_shard_id):
               vector_clock = get_incremented_clock(vector_clock, socket_addr)
-              # received forwarded request - broadcast within shard
               broadcast_request('PUT', '/key-value-store/' + key, request.json, True)
             else:
               vector_clock = get_incremented_clock(vector_clock, sender_addr)
             return put_key(key, request)
           else:
             vector_clock = get_incremented_clock(vector_clock, sender_addr)
-            return json.dumps({'message': 'updated vector clock only', 'causal-metadata': vector_clock, 'shard-id': this_shard_id}), 200
-    elif request.method == 'DELETE':
-      if sender_addr not in replica_store:
-        if requestShardID == this_shard_id:
-          # Broadcast if the request is from client.
-          broadcast_request('DELETE', '/key-value-store/' + key, request.json)
-          vector_clock = get_incremented_clock(vector_clock, socket_addr)
-          return delete_key(key, request)
-        else:
-          # Forward to first replica in appropriate shard id.
-          forwardUrl = 'http://' + altShard + '/key-value-store/'+ key
-          response = requests.delete(forwardUrl)
-          vector_clock = get_incremented_clock(vector_clock, altShard)
-          return response.content, response.status_code
-      else:
-        # received broadcast/forwarded request.
-        if requestShardID == this_shard_id:
-          if sender_addr not in shard_store.get(this_shard_id):
-            vector_clock = get_incremented_clock(vector_clock, socket_addr)
-            # received forwarded request - broadcast within shard
-            broadcast_request('DELETE', '/key-value-store/' + key, request.json, True)
-          else:
-            vector_clock = get_incremented_clock(vector_clock, sender_addr)
-          return delete_key(key, request)
-        else:
-          vector_clock = get_incremented_clock(vector_clock, sender_addr)
-          return json.dumps({'message': 'updated vector clock only', 'causal-metadata': vector_clock, 'shard-id': this_shard_id}), 200
+            return json.dumps({'message': 'Updated vector clock...'}), 203
 
-  # Should queue
-  else:
-    queue.append({'key': key, 'request': request.json, 'method': request.method})
-    vector_clock_for_client = get_incremented_clock(metadata, socket_addr)
-    return json.dumps({'causal-metadata': vector_clock_for_client, 'message': 'Request is queued, please wait...'}), 202
+      elif request.method == 'DELETE':
+        if sender_addr not in replica_store:
+          if target_shard_id == this_shard_id: # Broadcast if the request is from client to the correct shard
+            broadcast_request('DELETE', '/key-value-store/' + key, request.json)
+            return delete_key(key, request)
+          else: # Forward to first replica in appropriate shard
+            forward_url = 'http://' + node_in_shard + '/key-value-store/'+ key
+            response = requests.delete(forward_url)
+            broadcast_request('DELETE', '/internal?increment', {'forwarded-address': node_in_shard}, True)
+            return response.content, response.status_code
+        else:
+          if target_shard_id == this_shard_id: # Received broadcasted reqest and modifying locally
+            return delete_key(key, request)
+          else:
+            return json.dumps({'message': 'Updated vector clock...'}), 203
+
+    else:
+      queue.append({'key': key, 'request': request.json, 'method': request.method})
+      vector_clock_for_client = get_incremented_clock(metadata, socket_addr)
+      return json.dumps({'message': 'Request is queued, please wait...'}), 202
 
 def get_key(key):
   if key in store:
@@ -313,12 +304,14 @@ def delete_key(key, request):
     vector_clock = get_incremented_clock(vector_clock, socket_addr)
     return json.dumps({'message': 'Error in DELETE', 'doesExist': False, 'error': 'Key does not exist', 'causal-metadata': vector_clock}), 404
 
+# Determines whether some causal metadata corresponds with the next sequential operation
 def is_next_operation(causal_metadata):
   if len(causal_metadata) == 0:
     return True
   else:
     return is_causally_independent(causal_metadata)
 
+# Determines if some causal metadata correspond with a causally independent operation
 def is_causally_independent(causal_metadata):
   if socket_addr in vector_clock and socket_addr in causal_metadata and vector_clock[socket_addr] != causal_metadata[socket_addr]:
       return False
@@ -328,6 +321,7 @@ def is_causally_independent(causal_metadata):
         return False
     return True
 
+# Hashes a key to its corresponding shard ID
 def key_to_shard_id(key):
   hash_value = md5(key.encode('utf-8'))
   key_value = int(hash_value.hexdigest(), 16)
@@ -335,8 +329,7 @@ def key_to_shard_id(key):
   return shard_id
 
 def reshard(shard_count):
-  global shard_store, this_shard_id, store
-  os.environ["SHARD_COUNT"] = str(shard_count)
+  os.environ['SHARD_COUNT'] = str(shard_count)
   old_shard_store = shard_store.copy()
   old_store = store.copy()
 
@@ -344,17 +337,17 @@ def reshard(shard_count):
   json_body = { 'shard-count': shard_count }
   broadcast_request('PUT', '/internal?reshard', json_body)
 
-  # sends kv's no longer assigned to this shard
+  # Reallocates KV-pairs no longer belonging to this shard
   for key in old_store:
-    if key_to_shard_id(key) != this_shard_id:
-      proper_addr = shard_store[key_to_shard_id(key)][0]
+    proper_shard = key_to_shard_id(key)
+    if proper_shard != this_shard_id:
+      proper_addr = shard_store[proper_shard][0]
       json_body = {'key': key, 'value': store[key]}
       requests.put('http://' + proper_addr  + '/internal?put_key', json=json_body)
 
       del store[key]
-      # send delete requests to other replicas based on new shard id's
       for shard_id in shard_store:
-        if shard_id != this_shard_id and shard_id != key_to_shard_id(key):
+        if shard_id != this_shard_id and shard_id != proper_shard:
           replica_addr =  shard_store[shard_id][0]
           requests.delete('http://' + replica_addr + '/internal?delete_key', json={'key': key})
     else:
@@ -364,29 +357,26 @@ def reshard(shard_count):
           requests.delete('http://' + replica_addr + '/internal?delete_key', json={'key': key})
 
   for shard_id in old_shard_store:
-    if shard_id != this_shard_id:
-      # get stores from replicas of different old shard ids
+    if shard_id != this_shard_id: # Reallocates KV-pairs from all other shards
       replica_addr = old_shard_store[shard_id][0]
       response = requests.get('http://' + replica_addr + '/internal?store')
       some_store = response.json().get('store')
 
-      # adds keys that now belong to this shard
       for key in some_store:
         proper_shard = key_to_shard_id(key)
         if proper_shard != shard_id:
           if proper_shard == this_shard_id:
             store[key] = some_store[key]
-            # if key now assigned to this shard, request delete in old shard
+
             for some_shard_id in shard_store:
               if some_shard_id != this_shard_id:
                 replica_addr =  shard_store[some_shard_id][0]
                 requests.delete('http://' + replica_addr + '/internal?delete_key', json={'key': key})
           else:
-            # move key to a different new shard
             proper_replica = shard_store[proper_shard][0]
             json_body = {'key': key, 'value': some_store[key]}
             requests.put('http://' + proper_replica  + '/internal?put_key', json=json_body)
-            # delete keys in other replicas based on new id
+
             for other_shard_id in shard_store:
               if other_shard_id != proper_shard:
                 replica_addr =  shard_store[other_shard_id][0]
@@ -397,16 +387,17 @@ def reshard(shard_count):
               replica_addr =  shard_store[another_shard_id][0]
               requests.delete('http://' + replica_addr + '/internal?delete_key', json={'key': key})
 
-  for this_stupid_shard_id in shard_store:
-    first_replica = shard_store[this_stupid_shard_id][0]
+  for last_shard_id in shard_store:
+    first_replica = shard_store[last_shard_id][0]
     response = requests.get('http://' + first_replica + '/internal?store')
     forwarding_store = response.json().get('store')
 
-    for another_replica in shard_store[this_stupid_shard_id]:
+    for another_replica in shard_store[last_shard_id]:
       if another_replica != first_replica:
         json_body = {'store': forwarding_store}
         requests.put('http://' + another_replica  + '/internal?put_store', json=json_body)
 
+# Queries a replica's queue and processes all sequential operations
 def check_queue():
   global vector_clock
   if len(queue) == 0:
@@ -421,11 +412,12 @@ def check_queue():
         del store[message.get('key')]
       broadcast_request(message.get('method'), '/key-value-store/' + key, message.get('request'))
 
-      vector_clock = get_incremented_clock(message.get('request').get('causal-metadata').copy(), socket_addr)
+      vector_clock = get_incremented_clock(message.get('request').get('causal-metadata'), socket_addr)
       queue.pop(i)
     else:
       break
 
+# Calculates an incremented vector clock based on some replica address
 def get_incremented_clock(vector_clock, replica_addr):
   resulting_vector_clock = {}
 
@@ -442,5 +434,13 @@ def get_incremented_clock(vector_clock, replica_addr):
 if __name__ == '__main__':
   initialize_view()
   initialize_shard()
-  api.run(host='0.0.0.0', port=8085, debug=True, use_reloader=False)
 
+  # polling_replica_thread = threading.Thread(target=poll_replicas)
+  # polling_replica_thread.start()
+  # # polling_replica_thread.join() # This won't execute because thread is infinite, so it'll never end.
+
+  # polling_vector_clock_thread = threading.Thread(target=poll_vector_clock)
+  # polling_vector_clock_thread.start()
+  # # polling_vector_clock.join() # This won't execute because thread is infinite, so it'll never end.
+
+  api.run(host='0.0.0.0', port=8085, debug=True, use_reloader=False)
