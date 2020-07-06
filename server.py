@@ -58,7 +58,7 @@ def poll_replicas():
           delete_view(replica_addr)
           json_body = { 'socket-address': replica_addr }
           broadcast_request('DELETE', '/key-value-store-view', json_body) # Safety measure
-    time.sleep(5)
+    time.sleep(10)
 
 # Polls all other replicas and their vector clocks for causal consistency
 def poll_vector_clock():
@@ -76,7 +76,7 @@ def poll_vector_clock():
               check_queue()
         except:
           continue
-    time.sleep(1)
+    time.sleep(10)
 
 # Broadcasts a message globally or within a shard
 def broadcast_request(request_type, target_endpoint, json_body=None, to_shard_replicas=False):
@@ -437,10 +437,10 @@ if __name__ == '__main__':
 
   # polling_replica_thread = threading.Thread(target=poll_replicas)
   # polling_replica_thread.start()
-  # # polling_replica_thread.join() # This won't execute because thread is infinite, so it'll never end.
+  # # # polling_replica_thread.join() # This won't execute because thread is infinite, so it'll never end.
 
   # polling_vector_clock_thread = threading.Thread(target=poll_vector_clock)
   # polling_vector_clock_thread.start()
-  # # polling_vector_clock.join() # This won't execute because thread is infinite, so it'll never end.
+  # # # polling_vector_clock.join() # This won't execute because thread is infinite, so it'll never end.
 
   api.run(host='0.0.0.0', port=8085, debug=True, use_reloader=False)
