@@ -1,2 +1,2 @@
-# CSE138_Assignment4
-It's just a highly complicated (probably virtually impossible) REST API built on Docker and sourced by Flask.
+# Distributed Data Storage 
+It's just a REST API built on Docker and sourced by Flask. Replicated, Causally Consisteny, Fault Tolerant Key Value Store. 
